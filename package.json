@@ -1,0 +1,21 @@
+{
+  "name": "pi-ctf",
+  "version": "0.2.0",
+  "description": "Pi 扩展：以「提示词替换」为主（replace 模式用 CTF/渗透测试工作流提示词替换 pi 内置剧本，保留 AGENTS.md 与 skills）；提示词追加（append）供委派子代理使用。附带实时拒绝拦截。从 pi-session-patcher fork 独立。",
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types test/detector.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.86.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

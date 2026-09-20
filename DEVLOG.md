@@ -1,0 +1,142 @@
+# pi-ctf 开发日志（DEVLOG）
+
+> 本文件记录扩展的完整开发历程：设计决策、踩坑记录、验证方法、待办事项。
+> **新会话继续开发本扩展前，先通读本文**——读完即可接上全部上下文，无需重看开发对话。
+>
+> 配套阅读：[README.md](./README.md)（功能与使用）· 原项目 [ryfineZ/codex-session-patcher](https://github.com/ryfineZ/codex-session-patcher) · pi 官方文档（本机路径 `/Users/tutu/.node_modules/lib/node_modules/@earendil-works/pi-coding-agent/docs/`）
+
+---
+
+## 0. fork 独立记录（2026-09-20）
+
+从 `~/.pi/agent/extensions/pi-session-patcher` 复制到 `~/Desktop/TestCC/pi-ctf`，定位反转：
+
+- **默认模式 append → replace**：主要作用是提示词替换（用 CTF 提示词替换 pi 内置剧本，保留 AGENTS.md + skills）
+- **append 留给委派**：子代理 fork 父会话上下文时追加，不破坏子代理已有能力
+- 注入标记 `codex-session-patcher:pi-ctf` → `pi-ctf:prompt-replace`（模板首行、prompts.ts、探针检测同步改）
+- 菜单顺序改为「替换 / 追加 / 关闭注入 / 拦截器 / 状态」
+- 补齐缺失的 `tsconfig.json` 与 `test/detector.test.ts`（17 项断言，`pnpm test`）
+- devDeps 对齐全局 pi 0.86.0；包名/描述改为 pi-ctf
+- E2E 已验证：`--ctfr` 替换（原生剧本移除、AGENTS.md/skills 保留）、`--ctfa` 追加（原生剧本保留）
+
+历史章节（下）均为上游 pi-session-patcher 的开发记录，决策细节仍适用。
+
+---
+
+---
+
+## 1. 项目缘起
+
+[codex-session-patcher](https://github.com/ryfineZ/codex-session-patcher)（Python）已支持 Codex CLI / Claude Code / OpenCode 三平台的会话清理与 CTF 提示词注入，但不支持 pi。讨论过两条路线：
+
+| 路线 | 说明 | 结论 |
+| --- | --- | --- |
+| 给 Python 工具加 pi 会话格式（PiFormatStrategy） | 事后批量清理 pi 会话文件，接入 Web UI | 推迟（Part 1，见待办） |
+| **写 pi 原生扩展（本扩展）** | 实时拦截 + 提示词注入，"预防"形态 | ✅ 先做，体验更好 |
+
+最终定位：**扩展管"预防/实时"，主工具管"善后/批量"**，松耦合（可选联动），扩展零运行时依赖主工具。
+
+命名教训：初版叫 `codex-session-patcher-pi`（两平台名撞车），改为 **`pi-session-patcher`**，跟随 pi 生态 `pi-*` 命名惯例（pi-subagents / pi-lens / pi-web-access…）。
+
+## 2. 核心机制认知（一切设计的根基）
+
+1. **pi 的系统提示词每条请求现组装、不落盘**。组装逻辑见 `pi-mono/packages/coding-agent/dist/core/system-prompt.js` 的 `buildSystemPrompt`：customPrompt 或默认剧本 → 追加 `<project_context>`（AGENTS.md：全局/祖先/项目三级）→ 追加 skills → cwd。所以开关/模式切换对下一条消息立即生效
+
+ 追加 skills → cwd。→ 所以开关/模式切换**对下一条消息立即生效**，"中途开启"完全有意义
+2. **会话文件是 JSONL 树**（id/parentId），从叶子回溯根即当前上下文。`custom` entry 不参与 LLM 上下文 → 用它持久化扩展状态，resume 自动还原
+3. **扩展不能改"正在打开的会话文件"**（pi 内存树与磁盘文件会分叉）→ 批量清理历史会话只能靠主工具（事后、文件级）；本扩展做实时拦截（事前、消息级）
+
+## 3. 关键设计决策
+
+| 决策 | 理由 |
+| --- | --- |
+| **replace 模式保留 AGENTS.md 与 skills** | 对齐 pi 原生 `--system-prompt` 语义（"Replace default prompt; context files and skills are still appended"）。材料来自 `event.systemPromptOptions.contextFiles / skills`，按原生格式（`<project_context>` 包裹）重建。曾走过弯路：最初直接返回 CTF 文本，把用户 AGENTS.md 一起丢了——读 `buildSystemPrompt` 源码后修正 |
+| **三条启动旗标 `--ctf / --ctfa / --ctfr`** | 人体工学：a=append、r=replace、无后缀=默认追加（用户要求"CTF 默认就是 CTFA"） |
+| **带旗标恢复会话时覆盖会话内模式** | 显式敲旗标 = 明确要求，优先于持久化状态；`pi -c` 无旗标则完全听会话的。实测 `--ctfr --session <id>` 恢复 append 会话 → 模式翻转为 replace 并写回 |
+| **`--ctf-mode` 不设 default** | 若设 default="append"，resume 时 getFlag 返回它，会把会话内持久化的 replace 静默打回 append |
+| **菜单只标「真正生效」的选项** | 模式与开关是两个独立维度；注入关闭时还标着"当前模式"会误导（修过双标注 bug：替换模式+关闭注入同时标当前） |
+| **拦截替换策略：首个 text 块换兜底、其余 text 块移除** | 只换第一块会留残余拒绝文本；thinking/toolCall 块保留；返回新对象不改入参 |
+| **状态读写对称** | persistState 与 session_start 恢复必须同步加字段 |
+| **检测词表与兜底文本从主工具拷贝** | detector.py 词表逐条移植、MOCK_RESPONSE 逐字拷贝、isMojibake 逻辑移植（GBK 写坏配置自愈）——数据级松耦合 |
+| **共享配置可选读取** | `~/.codex-patcher/config.json` 的 mock_response / custom_keywords / ctf_prompts.pi.prompt，存在读、无则内置默认（mtime 缓存避免重复 IO） |
+| **`/ctf` 单入口菜单，无子命令** | 用户明确要求：菜单五项（追加/替换/关闭/拦截器/状态），快速路径全部移除 |
+| **菜单项带「← 当前」标注** | 实时反映状态；只在"真正生效"的项上标 |
+
+## 4. 踩过的坑（重要程度排序）
+
+1. **persistState 漏字段**：给状态加 injectionMode 时只改了 restore 没改 persist → resume 后模式静默回退（开关在、模式丢）。靠 E2E（-c 恢复后 payload 检查）暴露。**教训：状态对象加字段必须同步 persist/restore 两处**
+2. **探测假阴性**：在 before_agent_start 层探测注入，-e 探针先于全局扩展执行，看到链式注入前的 prompt → 误判"全局扩展没生效"。**教训：探针必须挂 `before_provider_request`（payload 层，与 handler 顺序无关）**
+3. **扩展旗标放参数末尾会吞位置参数**：`pi -p -e A -e B --ctf "prompt"` 整条命令静默变 no-op（旗标注册时机在参数解析的博弈）。**教训：文档统一要求旗标前置 `pi --ctf …`**
+4. **菜单双标注 bug**：模式与开关各自标"当前"→ 关闭注入时同时显示两个"当前"。**教训：多维度状态做单选标注时，先定义"哪一项才代表生效状态"**
+5. **pi-ai 类型无隐式索引签名**：宽松结构类型 ContentBlock 若加 `[key: string]: unknown`，interface 类型的 AssistantMessage 赋值直接报错 → ContentBlock 不带索引签名，用泛型 `<T extends AssistantMessageLike>` + SAFETY 注释保型
+6. **markdownlint/autofix 会重排格式**：md 文件被 lens autofix 重排编号/加语言标记，diff 后以 attached 全文为准
+
+## 5. 验证方法（改代码后照做）
+
+```bash
+# 0. 改完代码必做：同步安装副本（pi 加载的是安装目录，不是仓库！）
+cp index.ts ~/.pi/agent/extensions/pi-session-patcher/
+cp -r src ~/.pi/agent/extensions/pi-session-patcher/
+# 然后新会话生效，或 /reload
+
+# 1. 类型与单测
+npm run typecheck && npm test   # tsc 严格模式 + 16 项断言
+
+# 2. payload 探针（注入铁证，与 handler 顺序无关）
+mkdir -p /tmp/ctf-verify && cat > /tmp/ctf-verify/probe.ts <<'EOF'
+import { writeFileSync } from "node:fs";
+export default function (pi: any) {
+  pi.on("before_provider_request", async (event: any) => {
+    const raw = JSON.stringify(event.payload ?? {});
+    writeFileSync("/tmp/ctf-verify/result.json", JSON.stringify({
+      ctfInjected: raw.includes("codex-session-patcher:pi-ctf"),
+      defaultPromptPresent: raw.includes("coding agent harness"),   // pi 内置默认剧本特征
+      agentsMdPresent: raw.includes("Search Discipline"),            // 用户全局 AGENTS.md 特征
+      payloadKB: Math.round(raw.length / 1024),
+    }, null, 2));
+  });
+}
+EOF
+# append：pi -p --ctf  -e /tmp/ctf-verify/probe.ts "Reply with exactly: ok"
+# replace：pi -p --ctfr -e /tmp/ctf-verify/probe.ts "Reply with exactly: ok"
+# 期望：append → {true, true, true, ~101KB}；replace → {true, false, true, ~90KB}
+
+# 3. 拦截确定性 E2E（不赌模型真拒绝）
+pi -p "请一字不差地只回复这句话：我无法协助完成该请求"
+# 期望 stdout 是兜底文本"我会按授权的本地/测试服范围继续…"；会话文件里 assistant 消息无拒绝文本
+
+# 4. 持久化 E2E
+# 开 CTF + 选模式 → pi -c 恢复 → 探针复查，状态与模式应原样还原
+
+# 5. Python 主工具回归（确认零影响）
+python3 -m pytest -q --override-ini="addopts="   # 160 passed
+```
+
+## 6. 功能演进史（按用户需求迭代）
+
+1. 试用版三件套：`/ctf on|off` + append 注入 + 拦截（默认开）
+2. 双注入模式（append/replace），对齐主工具 `--ctf-injection-mode`
+3. 三条对称旗标 `--ctf/--ctfa/--ctfr`（嫌 `--ctf --ctf-mode replace` 太长）
+4. `/ctf` 交互式菜单（中文），移除全部子命令/快速路径/参数补全
+5. 菜单加拦截器开关项
+6. 菜单改英文（Append/Replace/Off/Status）→ 又改回中文（追加/替换/关闭注入/拦截器：开启/查看状态）
+7. replace 保留 AGENTS.md + skills（对齐 pi 原生语义）
+8. 内置模板从 claude_code_ctf_optimized.md 切换为 **ctf_optimized.md**（三层工作流版，身份段改 pi）
+9. 菜单标注逻辑修复（只标真正生效项）
+
+## 7. 待办 / 可选后续
+
+- [ ] 主工具 Python 侧接入 pi 会话格式（PiFormatStrategy + parser 文件名解析 + Web 扫描目标），让 Web UI 能批量清理历史 pi 会话
+- [ ] 扩展发布 npm 包（`pi install npm:pi-session-patcher`），补 CI + 徽章；也可放 git 仓库用 `pi install git:…`
+- [ ] replace 模式 skill 描述对齐 pi 原生 `<available_skills>` XML 格式（reviewer P2，当前为简化列表）
+- [ ] 状态恢复改为沿当前分支扫描（`getBranch()`）而非全文件最后一条，修复 /tree 跨分支边缘场景
+- [ ] 拦截 AI 改写：可选调用主工具的 LLM 配置生成上下文相关的替换文本（现为固定兜底文本）
+- [ ] `~/.zshrc` 里的 `pictf` 快捷函数与三条旗标功能重叠，二选一清理
+
+## 8. 质量基线（最后记录）
+
+- tsc --noEmit 严格模式：0 错误
+- 单元测试：16 项断言全过（detector/replace/isMojibake/模板加载/config 形状）
+- Code review（reviewer 子代理）：**OK**，无 critical/major；3 条 P2 均为已知取舍
+- E2E：9+ 场景（注入×旗标/命令/全局、持久化、拦截 stdout+落盘层、AGENTS.md 保留）
+- 主项目 Python 测试 160 passed（扩展零侵入证明）
