@@ -23,26 +23,25 @@ function check(name: string, fn: () => void): void {
 console.log("pi-roles state 状态机测试\n");
 
 // ── 默认状态 ─────────────────────────────────────────────────────────────
-check("默认：无角色 · 追加模式 · 拦截开", () => {
+check("默认：无角色 · 追加模式 · 自动拦截关闭", () => {
   const s = defaultRoleState();
-  assert.deepEqual(s, { role: null, mode: "append", intercept: true });
+  assert.deepEqual(s, { role: null, mode: "append", intercept: false });
 });
 
 // ── selectRole / clearRole ───────────────────────────────────────────────
-check("selectRole 设置角色，不改其他字段", () => {
+check("selectRole 设置角色，并自动开启自动拦截", () => {
   const s = applyRoleState(defaultRoleState(), {
     type: "selectRole",
     role: "ctf",
   });
   assert.deepEqual(s, { role: "ctf", mode: "append", intercept: true });
 });
-check("clearRole 清空角色", () => {
+check("clearRole 清空角色，自动拦截回到关闭", () => {
   const s = applyRoleState(
-    { role: "ctf", mode: "replace", intercept: false },
+    { role: "ctf", mode: "replace", intercept: true },
     { type: "clearRole" },
   );
-  assert.equal(s.role, null);
-  assert.equal(s.mode, "replace"); // 模式不受影响
+  assert.deepEqual(s, { role: null, mode: "replace", intercept: false });
 });
 
 // ── setMode / toggleIntercept ────────────────────────────────────────────
@@ -53,11 +52,11 @@ check("setMode 切换模式", () => {
   });
   assert.equal(s.mode, "replace");
 });
-check("toggleIntercept 翻转拦截", () => {
+check("toggleIntercept 手动翻转（默认关 → 开 → 关）", () => {
   const s1 = applyRoleState(defaultRoleState(), { type: "toggleIntercept" });
-  assert.equal(s1.intercept, false);
+  assert.equal(s1.intercept, true);
   const s2 = applyRoleState(s1, { type: "toggleIntercept" });
-  assert.equal(s2.intercept, true);
+  assert.equal(s2.intercept, false);
 });
 
 // ── 不修改入参（纯函数） ─────────────────────────────────────────────────

@@ -158,17 +158,15 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     }
   }
 
-  /** 外层主菜单：角色入口 + 模式单选 + 自动拦截（选了角色才显示）；Esc 退出 */
+  /** 外层主菜单：角色入口 + 模式单选 + 自动拦截；Esc 退出 */
   async function mainMenu(ctx: UiCtx): Promise<void> {
     for (;;) {
       const items = [
         `角色${state.role ? `  ${state.role}` : ""}`,
         `追加模式${state.mode === "append" ? "  ← 当前" : ""}`,
         `替换模式${state.mode === "replace" ? "  ← 当前" : ""}`,
+        `自动拦截：${state.intercept ? "开启" : "关闭"}`,
       ];
-      if (state.role) {
-        items.push(`自动拦截：${state.intercept ? "开启" : "关闭"}`);
-      }
       let picked: string | undefined;
       try {
         picked = await ctx.ui.select("pi-roles", items);
