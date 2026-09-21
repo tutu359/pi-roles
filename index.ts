@@ -1,18 +1,20 @@
 /**
  * pi-roles — 角色模板系统（从 pi-session-patcher fork 独立）
  *
- * 定位：以「角色」为单位管理提示词模板。一个角色 = roles/<name>.md 一个文件，
- * 放目录即自动出现在 /role 菜单，添加角色零代码。
+ * 以「角色」为单位管理提示词模板：一个角色 = roles/<name>.md 一个文件，
+ * 放目录即自动出现在角色子菜单，添加角色零代码。
  *
- * - replace（默认）：用角色模板替换 pi 内置默认剧本（保留 AGENTS.md 与 skill 清单），
- *   适合主会话换角色人设。
- * - append：在现有系统提示词末尾追加角色模板（保留原生剧本与父上下文），
- *   留给「委派」：子代理 fork 父会话上下文时带角色上场。
+ * 交互（两条通道）：
+ * - /role 菜单：外层主菜单（追加/替换模式、自动拦截）→ 角色子菜单（选择具体角色）
+ * - 启动旗标：pi --role <name> / --role-append <name> / --ctf* 快捷旗标
  *
- * 附带能力：实时拒绝拦截（会话清理的事前版）。
- * 拦截随角色模式联动：只有开启角色注入时才自动生效，其他模式关闭。
- * 助手消息定稿时（message_end）检测拒绝回复，命中则将文本替换为配合性内容，
- * 避免「拒绝记忆」污染后续 resume / 续聊。
+ * 注入模式：
+ * - append（默认）：在现有系统提示词末尾追加角色模板（保留原生剧本），委派子代理场景
+ * - replace：用角色模板替换 pi 内置默认剧本（保留 AGENTS.md 与 skill 清单），主会话强场景
+ *
+ * 附带能力：实时拒绝拦截（会话清理的事前版）。拦截总闸默认开，但仅当有角色时生效
+ * （无角色 = 注入关闭，拦截一并停用）。助手消息定稿时检测拒绝回复，命中则替换为
+ * 配合性兜底文本，避免「拒绝记忆」污染后续 resume / 续聊。
  *
  * 可选松耦合：本机存在 ~/.codex-patcher/config.json 时，读取
  * mock_response（兜底文本）、custom_keywords（自定义检测词）、
@@ -41,6 +43,14 @@ import {
   loadCspConfig,
   type CspConfig,
 } from "./src/config.ts";
+import {
+  applyRoleState,
+  defaultRoleState,
+  interceptActive,
+  isInjectionMode,
+  statusShort,
+  type RoleState,
+} from "./src/state.ts";
 
 /** 会话内状态持久化使用的 custom entry 类型 */
 const STATE_ENTRY_TYPE = "pi-roles-state";
@@ -51,18 +61,9 @@ const STATUS_KEY = "pi-roles";
 /** 事件与命令处理器共用的最小 UI 上下文（ExtensionContext / ExtensionCommandContext 均可赋值） */
 type UiCtx = Pick<ExtensionContext, "hasUI" | "ui">;
 
-/** 注入模式：replace 完全替换系统提示词（默认，主会话换角色）；append 在现有系统提示词后追加（委派子代理场景） */
-type InjectionMode = "append" | "replace";
-
-function isInjectionMode(value: unknown): value is InjectionMode {
-  return value === "append" || value === "replace";
-}
-
 export default function piRolesExtension(pi: ExtensionAPI) {
-  // ── 会话内状态 ──────────────────────────────────────────────────────────
-  let activeRole: string | null = null; // 当前角色（null = 注入关闭，按会话持久化）
-  let interceptEnabled = true; // 实时拒绝拦截开关（按会话持久化；仅角色模式下生效）
-  let injectionMode: InjectionMode = "replace"; // 注入模式：replace 替换（默认，主会话）/ append 追加（委派，按会话持久化）
+  // ── 会话内状态（默认：无角色 · 追加模式 · 拦截开） ─────────────────────────
+  let state: RoleState = defaultRoleState();
   let intercepted = 0; // 本会话拦截计数
   let config: CspConfig = { customKeywords: [], configFound: false };
 
@@ -97,7 +98,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
 
   function applyStatus(ctx: UiCtx): void {
     try {
-      ctx?.ui?.setStatus?.(STATUS_KEY, activeRole ? `R:${activeRole}` : undefined);
+      ctx?.ui?.setStatus?.(STATUS_KEY, statusShort(state));
     } catch {
       // 状态条不可用时忽略
     }
@@ -106,9 +107,9 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   function persistState(): void {
     try {
       pi.appendEntry(STATE_ENTRY_TYPE, {
-        role: activeRole,
-        interceptEnabled,
-        injectionMode,
+        role: state.role,
+        mode: state.mode,
+        intercept: state.intercept,
       });
     } catch {
       // 持久化失败只影响 resume 恢复，不影响本次会话
@@ -116,22 +117,24 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   }
 
   function modeLabel(): string {
-    return injectionMode === "replace"
+    return state.mode === "replace"
       ? "replace（替换系统提示词，主会话）"
-      : "append（追加，委派子代理）";
+      : "append（追加，保留原生剧本）";
   }
 
   function statusText(): string {
     const roles = listRoles();
     return [
       `${PACKAGE_MARKER} (角色模板系统 · 从 pi-session-patcher fork)`,
-      `· 当前角色: ${activeRole ?? "无（注入关闭）"} — 模式: ${modeLabel()} — 可用角色: ${
+      `· 当前角色: ${state.role ?? "无（注入关闭）"} — 模式: ${modeLabel()} — 可用角色: ${
         roles.map((r) => r.name).join(" / ") || "（无）"
       }`,
-      `· 实时拒绝拦截: ${interceptEnabled ? "✅ 开启" : "关闭"}（仅角色模式下生效）— 本会话已拦截 ${intercepted} 条`,
+      `· 自动拦截: ${state.intercept ? "✅ 开启" : "关闭"}${
+        state.role ? "" : "（有角色时才生效）"
+      } — 本会话已拦截 ${intercepted} 条`,
       `· 兜底替换文本: ${config.mockResponse ? "~/.codex-patcher/config.json" : "内置默认"}`,
       `· 共享配置: ${config.configFound ? CSP_CONFIG_PATH : "未找到（使用内置默认）"}`,
-      `· 注入标记: ${activeRole ? roleMarker(activeRole) : "—"}`,
+      `· 注入标记: ${state.role ? roleMarker(state.role) : "—"}`,
     ].join("\n");
   }
 
@@ -147,7 +150,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   // 字符串旗标不设 default：未传时 getFlag 返回 undefined，避免 resume 时把
   // 会话内持久化的模式误重置。
   pi.registerFlag("ctf-mode", {
-    description: "注入模式：replace 替换系统提示词（默认）/ append 追加（委派场景）",
+    description: "注入模式覆盖：replace 替换 / append 追加（--role-mode 旧名）",
     type: "string",
   });
 
@@ -163,13 +166,13 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     default: false,
   });
 
-  // --role <name>：通用角色旗标（默认 replace）
+  // --role <name>：通用角色旗标（模式用全局默认，即 append）
   pi.registerFlag("role", {
-    description: "以指定角色 + 替换模式启动，如 --role ctf / --role code-review",
+    description: "以指定角色启动（默认追加模式），如 --role ctf / --role tutor",
     type: "string",
   });
 
-  // --role-append <name>：通用角色旗标（append，委派场景）
+  // --role-append <name>：显式追加模式（与 --role 默认一致，保留显式语义）
   pi.registerFlag("role-append", {
     description: "以指定角色 + 追加模式启动（委派子代理场景），如 --role-append ctf",
     type: "string",
@@ -177,94 +180,124 @@ export default function piRolesExtension(pi: ExtensionAPI) {
 
   // --role-mode：模式覆盖（新名）；--ctf-mode 保留兼容
   pi.registerFlag("role-mode", {
-    description: "注入模式：replace 替换 / append 追加",
+    description: "注入模式覆盖：replace 替换 / append 追加",
     type: "string",
   });
 
-  // ─── 命令: /role（/ctf 为别名） ──────────��──────────────────────────────
+  // ─── 菜单 ───────────────────────────────────────────────────────────────
 
-  const roleMenuHandler = async (args: unknown, ctx: UiCtx): Promise<void> => {
+  /** 角色子菜单：选择具体角色；Esc 返回主菜单 */
+  async function roleSubMenu(ctx: UiCtx): Promise<void> {
     const roles = listRoles();
-    const parts = (typeof args === "string" ? args : "").trim().split(/\s+/).filter(Boolean);
-    const name = parts[0];
-    const modeArg = parts[1];
-    const mode = isInjectionMode(modeArg) ? modeArg : undefined;
-
-    // /role <name> [replace|append]：直切角色
-    if (name) {
-      if (!hasRole(name)) {
-        notify(
-          ctx,
-          `角色「${name}」不存在。可用：${roles.map((r) => r.name).join(" / ") || "（无）"}`,
-          "error",
-        );
-        return;
-      }
-      if (mode) injectionMode = mode;
-      activeRole = name;
-      persistState();
-      applyStatus(ctx);
+    if (roles.length === 0) {
       notify(
         ctx,
-        `✅ 角色「${name}」已启用（${modeLabel()}；拦截随角色模式自动开启）`,
+        "暂无角色：把 <名字>.md 放进 roles/ 或 ~/.pi/agent/roles/ 即可添加",
+        "warning",
+      );
+      return;
+    }
+    const items = [
+      `（当前模式：${state.mode} · 拦截：${state.intercept ? "开" : "关"}）`,
+      ...roles.map(
+        (r) =>
+          `${r.name}：${r.desc}${state.role === r.name ? "  ← 当前" : ""}`,
+      ),
+      "（返回主菜单）",
+    ];
+    try {
+      const picked = await ctx.ui.select("选择角色", items);
+      if (picked === undefined) return; // Esc 返回主菜单
+      const idx = items.indexOf(picked);
+      if (idx === 0) return; // 提示行，忽略
+      if (idx === items.length - 1) return; // 返回主菜单
+      const role = roles[idx - 1];
+      state = applyRoleState(state, { type: "selectRole", role: role.name });
+      persistState();
+      applyStatus(ctx);
+      notify(ctx, `✅ 角色「${role.name}」已启用（${modeLabel()}）`);
+      // 返回主菜单，便于继续调整模式/拦截
+    } catch {
+      notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
+    }
+  }
+
+  /** 外层主菜单：模式单选 + 自动拦截 + 进入角色子菜单；Esc 退出 */
+  async function mainMenu(ctx: UiCtx): Promise<void> {
+    for (;;) {
+      const items = [
+        `追加模式${state.mode === "append" ? "  ← 当前" : ""}`,
+        `替换模式${state.mode === "replace" ? "  ← 当前" : ""}`,
+        `自动拦截：${state.intercept ? "开启" : "关闭"}${
+          state.role ? "" : "（有角色时才生效）"
+        }`,
+        "──────────────",
+        "角色",
+        "查看状态",
+      ];
+      let picked: string | undefined;
+      try {
+        picked = await ctx.ui.select("pi-roles 主菜单", items);
+      } catch {
+        notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
+        return;
+      }
+      if (picked === undefined) return; // Esc 退出
+      const idx = items.indexOf(picked);
+      if (idx === 0) {
+        state = applyRoleState(state, { type: "setMode", mode: "append" });
+        persistState();
+        applyStatus(ctx);
+      } else if (idx === 1) {
+        state = applyRoleState(state, { type: "setMode", mode: "replace" });
+        persistState();
+        applyStatus(ctx);
+      } else if (idx === 2) {
+        state = applyRoleState(state, { type: "toggleIntercept" });
+        persistState();
+        applyStatus(ctx);
+        notify(
+          ctx,
+          state.intercept
+            ? "✅ 自动拦截已开启（有角色时生效）"
+            : "自动拦截已关闭",
+        );
+      } else if (idx === 3) {
+        // 分隔线装饰行，忽略
+      } else if (idx === 4) {
+        await roleSubMenu(ctx);
+      } else if (idx === 5) {
+        notify(ctx, statusText());
+      }
+    }
+  }
+
+  // ─── 命令: /role（/ctf 为别名） ──────────────────────────────────────────
+
+  const roleMenuHandler = async (args: unknown, ctx: UiCtx): Promise<void> => {
+    const argText = typeof args === "string" ? args.trim() : "";
+    if (argText) {
+      // 会话内直切暂不支持（交互收敛为菜单 + 启动旗标两条通道）
+      notify(
+        ctx,
+        "会话内请用 /role 菜单选择角色；启动时可用 --role <name> 或 --role-append <name> 旗标",
         "info",
       );
       return;
     }
-
-    // /role：交互式菜单（只标注真正生效的选项）
-    const menuItems = [
-      ...roles.map(
-        (r) =>
-          `角色 ${r.name}：${r.desc}${activeRole === r.name ? "  ← 当前" : ""}`,
-      ),
-      `关闭注入${activeRole ? "" : "  ← 当前"}`,
-      `拦截器：${interceptEnabled ? "开启" : "关闭"}${
-        activeRole ? "" : "（角色模式下才生效）"
-      }`,
-      "查看状态",
-    ];
-    try {
-      if (!ctx.hasUI) {
-        notify(
-          ctx,
-          "交互式菜单仅支持交互界面（TUI）；请用 /role <name> 或 pi --role <name> 旗标",
-          "warning",
-        );
-        return;
-      }
-      const picked = await ctx.ui.select("pi-roles 角色", menuItems);
-      if (picked === undefined) return; // Esc 取消，不做任何变更
-      const index = menuItems.indexOf(picked);
-      if (index >= 0 && index < roles.length) {
-        activeRole = roles[index].name;
-        persistState();
-        applyStatus(ctx);
-        notify(ctx, `✅ 角色「${roles[index].name}」已启用（${modeLabel()}）`);
-      } else if (index === roles.length) {
-        activeRole = null;
-        persistState();
-        applyStatus(ctx);
-        notify(ctx, "注入已关闭（拦截随角色模式停用）");
-      } else if (index === roles.length + 1) {
-        interceptEnabled = !interceptEnabled;
-        persistState();
-        notify(
-          ctx,
-          interceptEnabled
-            ? "✅ 拦截器已开启（仅角色模式下生效）"
-            : "拦截器已关闭（角色模式下也不再拦截）",
-        );
-      } else {
-        notify(ctx, statusText());
-      }
-    } catch {
-      notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
+    if (!ctx.hasUI) {
+      notify(
+        ctx,
+        "交互式菜单仅支持交互界面（TUI）；启动时请用 --role <name> / --role-append <name> 旗标",
+        "warning",
+      );
+      return;
     }
+    await mainMenu(ctx);
   };
 
   pi.registerCommand("role", {
-    description: "pi-roles: 角色模板系统菜单与切换（/role <name> [replace|append]）",
+    description: "pi-roles: 角色菜单（外层：模式/拦截 → 角色子菜单）",
     handler: roleMenuHandler,
   });
 
@@ -274,16 +307,14 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     handler: roleMenuHandler,
   });
 
-  // ─── 会话启动: 恢复状态 + 读取共享配置 ────────────────────────────────────
+  // ─── 会话启动: 恢复状态 + 读取共享配置 + 处理启动旗标 ──────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
     config = loadCspConfig();
-    activeRole = null;
-    interceptEnabled = true;
-    injectionMode = "replace";
+    state = defaultRoleState();
     intercepted = 0;
 
-    // 从会话 custom entry 恢复（兼容旧版 ctfEnabled 字段：true → ctf 角色）
+    // 从会话 custom entry 恢复（兼容旧字段：ctfEnabled → ctf 角色、interceptEnabled → intercept、injectionMode → mode）
     try {
       for (const entry of ctx.sessionManager.getEntries()) {
         if (entry.type !== "custom") continue;
@@ -294,34 +325,36 @@ export default function piRolesExtension(pi: ExtensionAPI) {
               ctfEnabled?: unknown;
               interceptEnabled?: unknown;
               injectionMode?: unknown;
+              intercept?: unknown;
+              mode?: unknown;
             }
           | undefined;
         if (!data) continue;
         if (typeof data.role === "string" && hasRole(data.role))
-          activeRole = data.role;
+          state = { ...state, role: data.role };
         if (
           typeof data.ctfEnabled === "boolean" &&
           data.ctfEnabled &&
-          !activeRole
+          !state.role
         ) {
-          activeRole = "ctf"; // 旧条目兼容：ctfEnabled=true → ctf 角色
+          state = { ...state, role: "ctf" }; // 旧条目兼容
         }
-        if (typeof data.interceptEnabled === "boolean")
-          interceptEnabled = data.interceptEnabled;
-        if (isInjectionMode(data.injectionMode))
-          injectionMode = data.injectionMode;
+        const intercept = data.intercept ?? data.interceptEnabled;
+        if (typeof intercept === "boolean")
+          state = { ...state, intercept };
+        const mode = data.mode ?? data.injectionMode;
+        if (isInjectionMode(mode)) state = { ...state, mode };
       }
     } catch {
       // 状态恢复失败按默认值处理
     }
 
-    // CLI 旗标强制开启并持久化（显式敲旗标 = 明确要求，优先于持久化状态）
-    // 兼容旧旗标：--ctf（追加）/ --ctfa（追加）/ --ctfr（替换）→ ctf 角色
+    // 启动旗标强制开启并持久化（显式敲旗标 = 明确要求，优先于持久化状态）
     try {
       const ctfr = pi.getFlag("ctfr") === true;
       const ctfa = pi.getFlag("ctfa") === true;
       let reqRole: string | null = null;
-      let reqMode: InjectionMode | null = null;
+      let reqMode = state.mode;
       if (ctfr) {
         reqRole = "ctf";
         reqMode = "replace";
@@ -333,7 +366,6 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       const roleAppendFlag = pi.getFlag("role-append");
       if (typeof roleFlag === "string" && roleFlag.trim()) {
         reqRole = roleFlag.trim();
-        if (!reqMode) reqMode = "replace";
       }
       if (typeof roleAppendFlag === "string" && roleAppendFlag.trim()) {
         reqRole = roleAppendFlag.trim();
@@ -342,11 +374,9 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       const flagMode = pi.getFlag("role-mode") ?? pi.getFlag("ctf-mode");
       if (isInjectionMode(flagMode)) reqMode = flagMode;
       if (reqRole && hasRole(reqRole)) {
-        if (activeRole !== reqRole || (reqMode && injectionMode !== reqMode)) {
-          activeRole = reqRole;
-          if (reqMode) injectionMode = reqMode;
-          persistState();
-        }
+        state = applyRoleState(state, { type: "selectRole", role: reqRole });
+        state = applyRoleState(state, { type: "setMode", mode: reqMode });
+        persistState();
       }
     } catch {
       // 旗标读取失败按未启用处理
@@ -358,9 +388,9 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   // ─── 角色提示词注入 ──────────────────────────────────────────────────────
 
   pi.on("before_agent_start", async (event) => {
-    if (!activeRole) return undefined;
-    const prompt = getRolePrompt(activeRole);
-    if (injectionMode === "replace") {
+    if (!state.role) return undefined;
+    const prompt = getRolePrompt(state.role);
+    if (state.mode === "replace") {
       // 替换模式：以角色模板为基底，但保留 AGENTS.md 等上下文文件与 skill 清单
       // （对齐 pi 原生 --system-prompt 语义：只替换内置默认剧本，不屏蔽用户自己的上下文）
       const parts: string[] = [prompt];
@@ -391,11 +421,10 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
   });
 
-  // ─── 实时拒绝拦截（随角色模式联动：仅注入开启时生效） ──────────────────────
+  // ─── 实时拒绝拦截（随角色联动：总闸开 && 有角色才生效） ─────────────────────
 
   pi.on("message_end", async (event, ctx) => {
-    // 拦截只在角色（CTF）模式开启时自动生效；其他模式一律不拦截
-    if (!interceptEnabled || !activeRole) return undefined;
+    if (!interceptActive(state)) return undefined;
 
     const message = event.message;
     if (message.role !== "assistant") return undefined;
@@ -412,7 +441,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     intercepted += 1;
     notify(
       ctx,
-      `🛡 ${PACKAGE_MARKER}: 已拦截 1 条拒绝回复并替换为配合性内容（本会话累计 ${intercepted} 条；/role 菜单可关闭拦截器）`,
+      `🛡 ${PACKAGE_MARKER}: 已拦截 1 条拒绝回复并替换为配合性内容（本会话累计 ${intercepted} 条）`,
       "warning",
     );
     return { message: replaced };

@@ -9,19 +9,19 @@
 
 | 模式 | 用途 | 行为 |
 | --- | --- | --- |
-| **replace（默认）** | 主会话换角色 | 用角色模板**替换** pi 内置默认剧本；**AGENTS.md 与 skill 清单仍保留**（对齐 pi 原生 `--system-prompt` 语义） |
-| **append（委派场景）** | 子代理委派 | 在现有系统提示词**末尾追加**角色模板，原生剧本与父上下文完整保留——子代理 fork 父会话时带角色上场 |
+| **append（默认）** | 日常 / 委派 | 在现有系统提示词**末尾追加**角色模板，原生剧本与父上下文完整保留 |
+| **replace** | 主会话强场景 | 用角色模板**替换** pi 内置默认剧本；**AGENTS.md 与 skill 清单仍保留** |
 
-- `/role` 菜单动态列出全部角色（含描述）；`/role <name>` 直切；`/role <name> append|replace` 指定模式
-- 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条显示当前角色（如 `R:ctf`）
+- 交互收敛为**两条通道**：`/role` 菜单（选择/设置）+ 启动旗标（`--role <name>`）
+- 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条常驻 `R:ctf · append · 🛡`
 - 内置角色：`ctf`（CTF/渗透测试三层工作流：侦察 → 漏洞证明 → 利用 → 取旗 → 复现）
 - **自定义角色**：`~/.pi/agent/roles/<name>.md`（同名覆盖内置）
 
-### 2. 实时拒绝拦截（随角色模式联动）
+### 2. 实时拒绝拦截（随角色联动）
 
-- **只有开启角色注入时才自动生效**，其他模式一律不拦截（本次迭代修复：拦截不再默认全局开启）
+- **自动拦截总闸 + 有角色才生效**：无角色时完全不拦截；有角色时自动开启（可菜单关闭）
 - 助手消息定稿时检测拒绝回复（强短语全文 + 弱关键词开头 150 字符 + 自定义关键词），命中即替换为配合性兜底文本，拒绝内容不落盘
-- 每次拦截都会通知；`/role` 菜单「拦截器」项可随时开关（角色模式下）
+- 每次拦截都会通知；`/role` 菜单「自动拦截」项可随时开关
 
 ## 安装
 
@@ -37,22 +37,42 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 
 ## 使用
 
-### 命令
+### /role 菜单（两级）
+
+**外层 · 主菜单**（模式单选 + 拦截开关 + 入口）：
 
 ```text
-/role                    交互式菜单（列出全部角色 + 关闭注入 + 拦截器 + 状态）
-/role ctf                直切角色（保持当前模式）
-/role ctf append         指定角色 + 追加模式（委派子代理场景）
-/role ctf replace        指定角色 + 替换模式（主会话）
-/ctf                     /role 的别名（兼容旧习惯）
+┌ pi-roles 主菜单 ─────────────────┐
+│ > 追加模式            ← 当前      │ ← 当前模式（默认 append）
+│   替换模式                        │
+│   自动拦截：开启                  │ ← 拦截总闸（有角色才生效）
+│   ──────────────────────────     │
+│   角色                            │ ← 进入角色子菜单
+│   查看状态                        │
+└──────────────────────────────────┘
 ```
+
+**内层 · 角色子菜单**（选具体角色，Esc 返回主菜单）：
+
+```text
+┌ 选择角色 ────────────────────────┐
+│  （当前模式：append · 拦截：开）   │
+│ > ctf：CTF / 渗透测试专家         │
+│   tutor：教学讲解与答疑           │
+│   …                              │
+│  （返回主菜单）                   │
+└──────────────────────────────────┘
+```
+
+- 主菜单 Esc = 退出（不改变任何状态）；角色子菜单 Esc = 返回主菜单
+- 选角色后返回主菜单，便于继续调整模式/拦截；状态条实时更新
 
 ### CLI 旗标（需放在其他旗标之前）
 
 | 旗标 | 说明 |
 | --- | --- |
-| `pi --role <name>` | 指定角色 + 替换模式（默认），如 `--role ctf` |
-| `pi --role-append <name>` | 指定角色 + 追加模式（委派），如 `--role-append ctf` |
+| `pi --role <name>` | 指定角色启动（默认追加模式），如 `--role ctf` |
+| `pi --role-append <name>` | 指定角色 + 追加模式（显式，委派场景） |
 | `pi --role-mode replace\|append` | 模式覆盖 |
 | `pi --ctfr` | 快捷：ctf 角色 + 替换模式 |
 | `pi --ctfa` / `--ctf` | 快捷：ctf 角色 + 追加模式 |
@@ -64,11 +84,11 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 
 ```markdown
 <!-- managed-by: pi-roles:<name> -->
-<!-- role-desc: <一句话用途，显示在 /role 菜单> -->
+<!-- role-desc: <一句话用途，显示在角色子菜单> -->
 <角色人设 + 行为规则 + 输出契约>
 ```
 
-保存后立即出现在 `/role` 菜单，`/role <name>` 即可启用。
+保存后立即出现在角色子菜单，选中即可启用。
 
 ## 可选：与 codex-session-patcher 联动
 
@@ -85,32 +105,33 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 ```bash
 pnpm install        # 安装 devDeps（typescript / @types/node / pi 类型）
 pnpm typecheck      # tsc --noEmit
-pnpm test           # node --experimental-strip-types 直接运行单元测试（17 项断言）
+pnpm test           # node --experimental-strip-types 直接运行单元测试（30 项断言）
 ```
 
 源码结构：
 
 ```text
 pi-roles/
-├── index.ts              # 入口：/role 命令、--role/--ctf* 旗标、角色注入、拦截（联动）、状态持久化
+├── index.ts              # 入口：/role 两级菜单、启动旗标、角色注入、拦截（联动）、状态持久化
 ├── roles/                # ⭐ 角色模板目录（放 .md = 一个角色）
 │   └── ctf.md            # CTF 角色（标记 pi-roles:ctf）
 ├── src/
+│   ├── state.ts          # 状态机纯函数（菜单/旗标/恢复共用；可单测）
 │   ├── prompts.ts        # 角色加载/发现（内置 + ~/.pi/agent/roles/）+ 兜底文本 + 乱码检测
 │   ├── detector.ts       # 两级拒绝检测器 + 文本提取/替换
 │   └── config.ts         # 可选读取 ~/.codex-patcher/config.json
-└── test/detector.test.ts # 单元测试
+└── test/                 # detector + state 单元测试（30 项断言）
 ```
 
 ### E2E 验证
 
 ```bash
 mkdir -p /tmp/ctf-verify
-# 替换模式：pi --ctfr -ne -p -e /tmp/ctf-verify/probe.ts -e index.ts "Reply with exactly: ok"
-#   期望：{ ctfInjected: true, defaultPromptPresent: false, agentsMdPresent: true }
-# 追加模式：pi --role-append ctf … 期望 defaultPromptPresent: true（原生剧本保留）
-# 拦截联动：
-#   无角色 → 拒绝回复原样输出；--ctfr 开启 → 输出兜底文本
+# 追加（默认）：pi --role ctf -ne -p -e /tmp/ctf-verify/probe.ts -e index.ts "Reply with exactly: ok"
+#   期望：{ ctfInjected: true, defaultPromptPresent: true（原生剧本保留）}
+# 替换：pi --ctfr … 期望 defaultPromptPresent: false
+# 无角色：pi -e index.ts … 期望 ctfInjected: false
+# 拦截联动：无角色 → 拒绝回复原样；--role ctf → 输出兜底文本
 ```
 
 ## 与上游 pi-session-patcher 的差异
@@ -119,8 +140,9 @@ mkdir -p /tmp/ctf-verify
 | --- | --- | --- |
 | 定位 | CTF 注入 + 拦截 | **角色模板系统**（CTF 只是第一个角色） |
 | 添加场景 | 改代码改模板 | 丢一个 `.md` 到 `roles/` |
-| 命令 | `/ctf` 单菜单 | `/role`（`/ctf` 别名） |
-| 拦截默认 | 全局开启 | **仅角色模式开启时联动生效** |
+| 交互 | `/ctf` 单菜单 + 命令直切 | **/role 两级菜单** + 启动旗标 |
+| 默认模式 | append（v0.3.0 曾改 replace） | **append** |
+| 拦截默认 | 全局开启 | **总闸 + 有角色才生效** |
 | 注入标记 | `codex-session-patcher:pi-ctf` | `pi-roles:<role>` |
 
 ## 局限
