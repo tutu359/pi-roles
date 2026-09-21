@@ -1,7 +1,7 @@
 {
-  "name": "pi-ctf",
-  "version": "0.2.0",
-  "description": "Pi 扩展：以「提示词替换」为主（replace 模式用 CTF/渗透测试工作流提示词替换 pi 内置剧本，保留 AGENTS.md 与 skills）；提示词追加（append）供委派子代理使用。附带实时拒绝拦截。从 pi-session-patcher fork 独立。",
+  "name": "pi-roles",
+  "version": "0.3.0",
+  "description": "Pi 角色模板系统：一个角色 = roles/<name>.md 一个文件，放目录即自动出现在 /role 菜单。replace 替换系统提示词（主会话换角色）/ append 追加（委派子代理带角色）。实时拒绝拦截随角色模式联动。从 pi-session-patcher fork 独立。",
   "type": "module",
   "license": "MIT",
   "pi": {

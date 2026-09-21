@@ -9,15 +9,29 @@
 
 ## 0. fork 独立记录（2026-09-20）
 
-从 `~/.pi/agent/extensions/pi-session-patcher` 复制到 `~/Desktop/TestCC/pi-ctf`，定位反转：
+从 `~/.pi/agent/extensions/pi-session-patcher` 复制到 `~/Desktop/TestCC/pi-roles`，定位升级为**角色模板系统**：
 
-- **默认模式 append → replace**：主要作用是提示词替换（用 CTF 提示词替换 pi 内置剧本，保留 AGENTS.md + skills）
-- **append 留给委派**：子代理 fork 父会话上下文时追加，不破坏子代理已有能力
-- 注入标记 `codex-session-patcher:pi-ctf` → `pi-ctf:prompt-replace`（模板首行、prompts.ts、探针检测同步改）
-- 菜单顺序改为「替换 / 追加 / 关闭注入 / 拦截器 / 状态」
-- 补齐缺失的 `tsconfig.json` 与 `test/detector.test.ts`（17 项断言，`pnpm test`）
-- devDeps 对齐全局 pi 0.86.0；包名/描述改为 pi-ctf
-- E2E 已验证：`--ctfr` 替换（原生剧本移除、AGENTS.md/skills 保留）、`--ctfa` 追加（原生剧本保留）
+### v0.3.0 角色化
+
+- **角色 = roles/<name>.md 一个文件**：头两行 frontmatter（managed-by + role-desc），目录自动发现，添加角色零代码
+- 用户自定义目录 `~/.pi/agent/roles/`（同名覆盖内置）
+- 命令 `/role`（/ctf 别名）：菜单 / 直切 / 指定模式；状态条显示 R:<role>
+- 旗标：`--role <name>`（replace）/ `--role-append <name>`（append）/ `--role-mode`；`--ctf/--ctfa/--ctfr/--ctf-mode` 兼容
+- 状态持久化 { role, injectionMode, interceptEnabled }，兼容旧 ctfEnabled 字段
+- **拦截随角色模式联动**：仅注入开启时生效（用户明确要求：拦截不再默认全局开启）
+- 注入标记 `pi-roles:<role>`；模板迁移 roles/ctf.md
+- 补齐缺失的 `tsconfig.json` 与 `test/detector.test.ts`（17 项断言）
+- devDeps 对齐全局 pi 0.86.0
+- E2E 已验证：替换/追加注入、拦截联动（无角色不拦 / 有角色拦）
+
+### 已确认待办（用户讨论中，未实施）
+
+- [ ] 角色绑定工具集（`pi.setActiveTools()` 已确认可用）：frontmatter 可选 `tools:` 字段，如 code-review 角色自动禁用写工具
+- [ ] 模板变量（注入 cwd / 项目名等）
+- [ ] 模板精细度策略（完整版 / 精简版）
+- [ ] 其他角色模板（用户尚未定清单）
+
+历史章节（下）均为上游 pi-session-patcher 的开发记录，决策细节仍适用。
 
 历史章节（下）均为上游 pi-session-patcher 的开发记录，决策细节仍适用。
 
