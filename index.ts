@@ -30,7 +30,6 @@ import {
 } from "./src/detector.ts";
 import {
   FALLBACK_RESPONSE,
-  PACKAGE_MARKER,
   listRoles,
   getRoleContent,
   hasRole,
@@ -132,12 +131,6 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     }
   }
 
-  function modeLabel(): string {
-    return state.mode === "replace"
-      ? "replace（替换系统提示词，主会话）"
-      : "append（追加，保留原生剧本）";
-  }
-
   // ─── 菜单 ───────────────────────────────────────────────────────────────
 
   /** 截断描述文本（按字符计，超长加省略号） */
@@ -173,7 +166,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       state = applyRoleState(state, { type: "selectRole", role: role.name });
       persistState();
       applyStatus(ctx);
-      notify(ctx, `✅ 角色「${role.name}」已启用（${modeLabel()}）`);
+      notify(ctx, `✅ 已启用 ${role.name} · ${state.mode}`);
       // 返回主菜单，便于继续调整模式/拦截
     } catch {
       notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
@@ -238,7 +231,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     if (!ctx.hasUI) {
       notify(
         ctx,
-        "交互式菜单仅支持交互界面（TUI），请用 /role 进入",
+        "无交互界面，菜单不可用",
         "warning",
       );
       return;
@@ -352,7 +345,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     intercepted += 1;
     notify(
       ctx,
-      `🛡 ${PACKAGE_MARKER}: 已拦截 1 条拒绝回复并替换为配合性内容（本会话累计 ${intercepted} 条）`,
+      `🛡 已拦截拒绝回复 · 累计 ${intercepted}`,
       "warning",
     );
     return { message: replaced };
