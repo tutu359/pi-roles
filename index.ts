@@ -4,9 +4,8 @@
  * 以「角色」为单位管理提示词模板：一个角色 = roles/<name>.md 一个文件，
  * 放目录即自动出现在角色子菜单，添加角色零代码。
  *
- * 交互（两条通道）：
- * - /role 菜单：外层主菜单（追加/替换模式、自动拦截）→ 角色子菜单（选择具体角色）
- * - 启动旗标：pi --role <name> / --role-append <name> / --ctf* 快捷旗标
+ * 交互：/role 菜单（外层主菜单：追加/替换模式、自动拦截 → 角色子菜单：选择具体角色）。
+ * 启动旗标方案待定（暂未注册）。
  *
  * 注入模式：
  * - append（默认）：在现有系统提示词末尾追加角色模板（保留原生剧本），委派子代理场景
@@ -138,52 +137,6 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     ].join("\n");
   }
 
-  // ─── 命令行旗标 ─────────────────────────────────────────────────────────
-
-  // --ctf/--ctfa/--ctfr：CTF 角色快捷旗标（兼容 pi-session-patcher 习惯）
-  pi.registerFlag("ctf", {
-    description: "以 CTF 角色启动（追加模式，等价 --role-append ctf）",
-    type: "boolean",
-    default: false,
-  });
-
-  // 字符串旗标不设 default：未传时 getFlag 返回 undefined，避免 resume 时把
-  // 会话内持久化的模式误重置。
-  pi.registerFlag("ctf-mode", {
-    description: "注入模式覆盖：replace 替换 / append 追加（--role-mode 旧名）",
-    type: "string",
-  });
-
-  pi.registerFlag("ctfr", {
-    description: "以 CTF 角色 + 替换模式启动（主会话强 CTF）",
-    type: "boolean",
-    default: false,
-  });
-
-  pi.registerFlag("ctfa", {
-    description: "以 CTF 角色 + 追加模式启动（等价 --ctf）",
-    type: "boolean",
-    default: false,
-  });
-
-  // --role <name>：通用角色旗标（模式用全局默认，即 append）
-  pi.registerFlag("role", {
-    description: "以指定角色启动（默认追加模式），如 --role ctf / --role tutor",
-    type: "string",
-  });
-
-  // --role-append <name>：显式追加模式（与 --role 默认一致，保留显式语义）
-  pi.registerFlag("role-append", {
-    description: "以指定角色 + 追加模式启动（委派子代理场景），如 --role-append ctf",
-    type: "string",
-  });
-
-  // --role-mode：模式覆盖（新名）；--ctf-mode 保留兼容
-  pi.registerFlag("role-mode", {
-    description: "注入模式覆盖：replace 替换 / append 追加",
-    type: "string",
-  });
-
   // ─── 菜单 ───────────────────────────────────────────────────────────────
 
   /** 角色子菜单：选择具体角色；Esc 返回主菜单 */
@@ -272,15 +225,15 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     }
   }
 
-  // ─── 命令: /role（/ctf 为别名） ──────────────────────────────────────────
+  // ─── 命令: /role ────────────────────────────────────────────────────────
 
   const roleMenuHandler = async (args: unknown, ctx: UiCtx): Promise<void> => {
     const argText = typeof args === "string" ? args.trim() : "";
     if (argText) {
-      // 会话内直切暂不支持（交互收敛为菜单 + 启动旗标两条通道）
+      // 会话内直切暂不支持（交互收敛为 /role 菜单）
       notify(
         ctx,
-        "会话内请用 /role 菜单选择角色；启动时可用 --role <name> 或 --role-append <name> 旗标",
+        "会话内请用 /role 菜单选择角色",
         "info",
       );
       return;
@@ -288,7 +241,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     if (!ctx.hasUI) {
       notify(
         ctx,
-        "交互式菜单仅支持交互界面（TUI）；启动时请用 --role <name> / --role-append <name> 旗标",
+        "交互式菜单仅支持交互界面（TUI），请用 /role 进入",
         "warning",
       );
       return;
@@ -301,13 +254,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     handler: roleMenuHandler,
   });
 
-  // /ctf = /role 别名（兼容旧习惯）
-  pi.registerCommand("ctf", {
-    description: "pi-roles: /role 的别名（角色菜单）",
-    handler: roleMenuHandler,
-  });
-
-  // ─── 会话启动: 恢复状态 + 读取共享配置 + 处理启动旗标 ──────────────────────
+  // ─── 会话启动: 恢复状态 + 读取共享配置 ────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
     config = loadCspConfig();
@@ -347,39 +294,6 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       }
     } catch {
       // 状态恢复失败按默认值处理
-    }
-
-    // 启动旗标强制开启并持久化（显式敲旗标 = 明确要求，优先于持久化状态）
-    try {
-      const ctfr = pi.getFlag("ctfr") === true;
-      const ctfa = pi.getFlag("ctfa") === true;
-      let reqRole: string | null = null;
-      let reqMode = state.mode;
-      if (ctfr) {
-        reqRole = "ctf";
-        reqMode = "replace";
-      } else if (ctfa || pi.getFlag("ctf")) {
-        reqRole = "ctf";
-        reqMode = "append";
-      }
-      const roleFlag = pi.getFlag("role");
-      const roleAppendFlag = pi.getFlag("role-append");
-      if (typeof roleFlag === "string" && roleFlag.trim()) {
-        reqRole = roleFlag.trim();
-      }
-      if (typeof roleAppendFlag === "string" && roleAppendFlag.trim()) {
-        reqRole = roleAppendFlag.trim();
-        reqMode = "append";
-      }
-      const flagMode = pi.getFlag("role-mode") ?? pi.getFlag("ctf-mode");
-      if (isInjectionMode(flagMode)) reqMode = flagMode;
-      if (reqRole && hasRole(reqRole)) {
-        state = applyRoleState(state, { type: "selectRole", role: reqRole });
-        state = applyRoleState(state, { type: "setMode", mode: reqMode });
-        persistState();
-      }
-    } catch {
-      // 旗标读取失败按未启用处理
     }
 
     applyStatus(ctx);
