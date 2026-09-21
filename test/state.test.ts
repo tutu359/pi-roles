@@ -9,7 +9,6 @@ import {
   defaultRoleState,
   interceptActive,
   isInjectionMode,
-  statusShort,
   type RoleState,
 } from "../src/state.ts";
 
@@ -76,23 +75,6 @@ check("拦截不生效：无角色（即使总闸开）", () => {
 });
 check("拦截不生效：总闸关（即使有角色）", () => {
   assert.equal(interceptActive({ role: "ctf", mode: "append", intercept: false }), false);
-});
-
-// ── statusShort：状态条文本 ──────────────────────────────────────────────
-check("有角色：R:<role> · mode · 🛡", () => {
-  assert.equal(
-    statusShort({ role: "ctf", mode: "append", intercept: true }),
-    "R:ctf · append · 🛡",
-  );
-});
-check("拦截关时不显示 🛡", () => {
-  assert.equal(
-    statusShort({ role: "ctf", mode: "replace", intercept: false }),
-    "R:ctf · replace",
-  );
-});
-check("无角色：返回 undefined（清空状态条）", () => {
-  assert.equal(statusShort({ role: null, mode: "append", intercept: true }), undefined);
 });
 
 // ── isInjectionMode ──────────────────────────────────────────────────────

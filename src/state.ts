@@ -1,7 +1,7 @@
 /**
  * 角色系统状态机（纯函数，无副作用）
  *
- * 菜单 / 启动旗标 / 会话恢复共用同一套动作，保证行为一致且可单测。
+ * 菜单 / 会话恢复共用同一套动作，保证行为一致且可单测。
  * 状态：role（当前角色，null = 注入关闭）+ mode（注入模式）+ intercept（自动拦截开关：默认关闭，
  * 选中角色时自动开启，也可手动切换）。
  */
@@ -57,12 +57,4 @@ export function applyRoleState(
 /** 拦截是否实际生效：开关开启 && 有角色 */
 export function interceptActive(state: RoleState): boolean {
   return state.intercept && state.role !== null;
-}
-
-/** 状态条短文本（如 R:ctf · append · 🛡）；无角色时返回 undefined（清空状态条） */
-export function statusShort(state: RoleState): string | undefined {
-  if (!state.role) return undefined;
-  const parts = [`R:${state.role}`, state.mode];
-  if (state.intercept) parts.push("🛡");
-  return parts.join(" · ");
 }

@@ -42,7 +42,6 @@ import {
   defaultRoleState,
   interceptActive,
   isInjectionMode,
-  statusShort,
   type RoleState,
 } from "./src/state.ts";
 
@@ -90,9 +89,32 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     }
   }
 
+  /**
+   * 状态栏文本：`[ctf]·replace·🛡`
+   * 配色：方括号/分隔点 dim（最淡）→ 模式 muted（中间调）→ 角色名 accent（主题高亮）
+   * 用主题色而非硬编码颜色，换浅色/深色主题时自动适配；🛡 为 emoji，颜色由终端决定。
+   * 无角色时返回 undefined（清空状态栏）。
+   */
+  function statusLine(ctx: UiCtx): string | undefined {
+    if (!state.role) return undefined;
+    const theme = ctx?.ui?.theme;
+    const paint = (color: "dim" | "accent" | "muted", text: string): string => {
+      if (!theme) return text;
+      try {
+        return theme.fg(color, text);
+      } catch {
+        return text; // 未知颜色名等异常时回退为纯文本
+      }
+    };
+    let out = `${paint("dim", "[")}${paint("accent", state.role)}${paint("dim", "]")}`;
+    out += `${paint("dim", "·")}${paint("muted", state.mode)}`;
+    if (state.intercept) out += `${paint("dim", "·")}🛡`;
+    return out;
+  }
+
   function applyStatus(ctx: UiCtx): void {
     try {
-      ctx?.ui?.setStatus?.(STATUS_KEY, statusShort(state));
+      ctx?.ui?.setStatus?.(STATUS_KEY, statusLine(ctx));
     } catch {
       // 状态条不可用时忽略
     }
