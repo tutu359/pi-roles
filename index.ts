@@ -31,17 +31,12 @@ import {
 import {
   FALLBACK_RESPONSE,
   PACKAGE_MARKER,
-  roleMarker,
   listRoles,
   getRoleContent,
   hasRole,
   isMojibake,
 } from "./src/prompts.ts";
-import {
-  CSP_CONFIG_PATH,
-  loadCspConfig,
-  type CspConfig,
-} from "./src/config.ts";
+import { loadCspConfig, type CspConfig } from "./src/config.ts";
 import {
   applyRoleState,
   defaultRoleState,
@@ -121,23 +116,13 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       : "append（追加，保留原生剧本）";
   }
 
-  function statusText(): string {
-    const roles = listRoles();
-    return [
-      `${PACKAGE_MARKER} (角色模板系统 · 从 pi-session-patcher fork)`,
-      `· 当前角色: ${state.role ?? "无（注入关闭）"} — 模式: ${modeLabel()} — 可用角色: ${
-        roles.map((r) => r.name).join(" / ") || "（无）"
-      }`,
-      `· 自动拦截: ${state.intercept ? "✅ 开启" : "关闭"}${
-        state.role ? "" : "（有角色时才生效）"
-      } — 本会话已拦截 ${intercepted} 条`,
-      `· 兜底替换文本: ${config.mockResponse ? "~/.codex-patcher/config.json" : "内置默认"}`,
-      `· 共享配置: ${config.configFound ? CSP_CONFIG_PATH : "未找到（使用内置默认）"}`,
-      `· 注入标记: ${state.role ? roleMarker(state.role) : "—"}`,
-    ].join("\n");
-  }
-
   // ─── 菜单 ───────────────────────────────────────────────────────────────
+
+  /** 截断描述文本（按字符计，超长加省略号） */
+  function truncateDesc(text: string, max = 40): string {
+    const chars = Array.from(text);
+    return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
+  }
 
   /** 角色子菜单：选择具体角色；Esc 返回主菜单 */
   async function roleSubMenu(ctx: UiCtx): Promise<void> {
@@ -150,21 +135,19 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       );
       return;
     }
-    const items = [
-      `（当前模式：${state.mode} · 拦截：${state.intercept ? "开" : "关"}）`,
-      ...roles.map(
-        (r) =>
-          `${r.name}：${r.desc}${state.role === r.name ? "  ← 当前" : ""}`,
-      ),
-      "（返回主菜单）",
-    ];
+    const maxNameLen = Math.max(...roles.map((r) => r.name.length));
+    const items = roles.map((r) => {
+      const pad = " ".repeat(Math.max(2, maxNameLen - r.name.length + 2));
+      const current = state.role === r.name ? "  ← 当前" : "";
+      return `${r.name}${pad}${truncateDesc(r.desc)}${current}`;
+    });
+    items.push("（返回主菜单）");
     try {
       const picked = await ctx.ui.select("选择角色", items);
       if (picked === undefined) return; // Esc 返回主菜单
       const idx = items.indexOf(picked);
-      if (idx === 0) return; // 提示行，忽略
       if (idx === items.length - 1) return; // 返回主菜单
-      const role = roles[idx - 1];
+      const role = roles[idx];
       state = applyRoleState(state, { type: "selectRole", role: role.name });
       persistState();
       applyStatus(ctx);
@@ -175,22 +158,20 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     }
   }
 
-  /** 外层主菜单：模式单选 + 自动拦截 + 进入角色子菜单；Esc 退出 */
+  /** 外层主菜单：角色入口 + 模式单选 + 自动拦截（选了角色才显示）；Esc 退出 */
   async function mainMenu(ctx: UiCtx): Promise<void> {
     for (;;) {
       const items = [
+        `角色${state.role ? `  ${state.role}` : ""}`,
         `追加模式${state.mode === "append" ? "  ← 当前" : ""}`,
         `替换模式${state.mode === "replace" ? "  ← 当前" : ""}`,
-        `自动拦截：${state.intercept ? "开启" : "关闭"}${
-          state.role ? "" : "（有角色时才生效）"
-        }`,
-        "──────────────",
-        "角色",
-        "查看状态",
       ];
+      if (state.role) {
+        items.push(`自动拦截：${state.intercept ? "开启" : "关闭"}`);
+      }
       let picked: string | undefined;
       try {
-        picked = await ctx.ui.select("pi-roles 主菜单", items);
+        picked = await ctx.ui.select("pi-roles", items);
       } catch {
         notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
         return;
@@ -198,29 +179,23 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       if (picked === undefined) return; // Esc 退出
       const idx = items.indexOf(picked);
       if (idx === 0) {
+        await roleSubMenu(ctx);
+      } else if (idx === 1) {
         state = applyRoleState(state, { type: "setMode", mode: "append" });
         persistState();
         applyStatus(ctx);
-      } else if (idx === 1) {
+      } else if (idx === 2) {
         state = applyRoleState(state, { type: "setMode", mode: "replace" });
         persistState();
         applyStatus(ctx);
-      } else if (idx === 2) {
+      } else if (idx === 3) {
         state = applyRoleState(state, { type: "toggleIntercept" });
         persistState();
         applyStatus(ctx);
         notify(
           ctx,
-          state.intercept
-            ? "✅ 自动拦截已开启（有角色时生效）"
-            : "自动拦截已关闭",
+          state.intercept ? "自动拦截已开启" : "自动拦截已关闭",
         );
-      } else if (idx === 3) {
-        // 分隔线装饰行，忽略
-      } else if (idx === 4) {
-        await roleSubMenu(ctx);
-      } else if (idx === 5) {
-        notify(ctx, statusText());
       }
     }
   }
