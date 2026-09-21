@@ -141,7 +141,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       const current = state.role === r.name ? "  ← 当前" : "";
       return `${r.name}${pad}${truncateDesc(r.desc)}${current}`;
     });
-    items.push("（返回主菜单）");
+    items.push("返回");
     try {
       const picked = await ctx.ui.select("选择角色", items);
       if (picked === undefined) return; // Esc 返回主菜单
@@ -161,11 +161,13 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   /** 外层主菜单：角色入口 + 模式单选 + 自动拦截；Esc 退出 */
   async function mainMenu(ctx: UiCtx): Promise<void> {
     for (;;) {
+      const label = (name: string, value = ""): string =>
+        value ? `${name}  ${value}` : name;
       const items = [
-        `角色${state.role ? `  ${state.role}` : ""}`,
-        `追加模式${state.mode === "append" ? "  ← 当前" : ""}`,
-        `替换模式${state.mode === "replace" ? "  ← 当前" : ""}`,
-        `自动拦截：${state.intercept ? "开启" : "关闭"}`,
+        label("选择角色", state.role ?? ""),
+        label("追加模式", state.mode === "append" ? "← 当前" : ""),
+        label("替换模式", state.mode === "replace" ? "← 当前" : ""),
+        label("自动拦截", state.intercept ? "开启" : "关闭"),
       ];
       let picked: string | undefined;
       try {
