@@ -11,13 +11,9 @@
  * - append（默认）：在现有系统提示词末尾追加角色模板（保留原生剧本），委派子代理场景
  * - replace：用角色模板替换 pi 内置默认剧本（保留 AGENTS.md 与 skill 清单），主会话强场景
  *
- * 附带能力：实时拒绝拦截（会话清理的事前版）。拦截总闸默认开，但仅当有角色时生效
- * （无角色 = 注入关闭，拦截一并停用）。助手消息定稿时检测拒绝回复，命中则替换为
- * 配合性兜底文本，避免「拒绝记忆」污染后续 resume / 续聊。
- *
- * 可选松耦合：本机存在 ~/.codex-patcher/config.json 时，读取
- * mock_response（兜底文本）、custom_keywords（自定义检测词）、
- * ctf_prompts.pi.prompt（ctf 角色模板覆盖）。不安装主工具也完整可用。
+ * 附带能力：实时拒绝拦截（会话清理的事前版）。拦截开关默认关闭，选中角色时自动开启，
+ * 且仅在开关开启且已选角色时生效。助手消息定稿时检测拒绝回复，命中则替换为内置兜底文本，
+ * 避免「拒绝记忆」污染后续 resume / 续聊。
  */
 import type {
   ExtensionAPI,
@@ -33,9 +29,7 @@ import {
   listRoles,
   getRoleContent,
   hasRole,
-  isMojibake,
 } from "./src/prompts.ts";
-import { loadCspConfig, type CspConfig } from "./src/config.ts";
 import {
   applyRoleState,
   defaultRoleState,
@@ -54,26 +48,15 @@ const STATUS_KEY = "pi-roles";
 type UiCtx = Pick<ExtensionContext, "hasUI" | "ui">;
 
 export default function piRolesExtension(pi: ExtensionAPI) {
-  // ── 会话内状态（默认：无角色 · 追加模式 · 拦截开） ─────────────────────────
+  // ── 会话内状态（默认：无角色 · 追加模式 · 自动拦截关闭） ───────────────────
   let state: RoleState = defaultRoleState();
   let intercepted = 0; // 本会话拦截计数
-  let config: CspConfig = { customKeywords: [], configFound: false };
 
   // ─── 工具函数 ───────────────────────────────────────────────────────────
 
-  /** 取角色模板：ctf 角色允许 ~/.codex-patcher/config.json 覆盖 */
+  /** 取角色模板内容（加载失败时回退精简兜底模板） */
   function getRolePrompt(name: string): string {
-    if (name === "ctf" && config.ctfPrompt?.trim()) {
-      return config.ctfPrompt.trim();
-    }
     return getRoleContent(name);
-  }
-
-  function getFallbackText(): string {
-    if (config.mockResponse && !isMojibake(config.mockResponse)) {
-      return config.mockResponse;
-    }
-    return FALLBACK_RESPONSE;
   }
 
   function notify(
@@ -244,10 +227,9 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     handler: roleMenuHandler,
   });
 
-  // ─── 会话启动: 恢复状态 + 读取共享配置 ────────────────────────────────────
+  // ─── 会话启动: 恢复状态 ─────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    config = loadCspConfig();
     state = defaultRoleState();
     intercepted = 0;
 
@@ -336,10 +318,10 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     const text = extractAssistantText(message);
     if (!text || !text.trim()) return undefined;
 
-    const fallback = getFallbackText();
+    const fallback = FALLBACK_RESPONSE;
     if (text.trim() === fallback.trim()) return undefined; // 已是兜底文本，避免重复处理
 
-    if (!detectRefusal(text, config.customKeywords)) return undefined;
+    if (!detectRefusal(text)) return undefined;
 
     const replaced = replaceAssistantTextBlocks(message, fallback);
     intercepted += 1;

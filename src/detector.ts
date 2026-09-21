@@ -1,81 +1,88 @@
 /**
- * 拒绝内容检测器 — 移植自 codex-session-patcher/core/detector.py
+ * 拒绝内容检测器
  *
- * 两级检测策略：
- * 1. 强拒绝短语：出现在任意位置即判定（误报率低）
- * 2. 弱拒绝关键词：仅在消息开头 150 字符内出现才判定
- * 3. 自定义关键词（可选）：全文匹配，作为强匹配处理
+ * 关键词表在仓库根目录的 keywords.txt 里维护（本文件不写死词表）：
+ * 1. [全文] 段：关键词出现在任意位置即判定
+ * 2. [开头] 段：关键词仅在消息开头 150 字符内出现才判定（避免正文里顺口提一句就误伤）
+ *
+ * keywords.txt 缺失时回退到最小应急词表（EMERGENCY_KEYWORDS），避免功能静默失效。
  */
+import { readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-/** 强拒绝短语：全文任意位置命中即判定为拒绝 */
-export const STRONG_REFUSAL_PHRASES: readonly string[] = [
-  // 中文
-  "我无法协助",
-  "我无法帮助",
-  "我不能协助",
-  "我不能帮助",
-  "我不能做",
-  "我无法做",
-  "我不会帮",
-  "我无法提供",
-  "违反了我的",
-  "违反我的",
-  "这违反",
-  "我拒绝",
-  "我必须拒绝",
-  // 英文
-  "i cannot assist",
-  "i can't assist",
-  "i'm unable to assist",
-  "i cannot help",
-  "i can't help",
-  "i'm unable to help",
-  "i must decline",
-  "i must refuse",
-  "against my guidelines",
-  "against my policy",
-  "violates my",
-  "i won't help",
-  "i won't assist",
-  "as an ai",
-  "as a language model",
-  "i apologize, but i",
-  "i'm sorry, but i can't",
-  "not able to provide",
-  "not able to assist",
-];
+/** 开头匹配段的位置限制（字符数） */
+export const HEAD_LIMIT = 150;
 
-/** 弱拒绝关键词：需要出现在消息开头（前 150 字符）才算拒绝 */
-export const WEAK_REFUSAL_KEYWORDS: readonly string[] = [
-  // 中文
-  "抱歉",
-  "很抱歉",
-  "对不起",
-  "不好意思",
-  "我无法",
-  "我不能",
-  "不允许",
-  "禁止",
-  // 中文 - 省略主语的直接拒绝
-  "不能帮你",
-  "不能协助",
-  "无法帮你",
-  "无法协助你",
-  "不会帮你",
-  "不会帮助",
-  "不能为你",
-  "无法为你",
-  // 英文
-  "sorry",
-  "apologize",
-  "i cannot",
-  "i can't",
-  "i'm unable",
-  "unable to",
-  "not permitted",
-  "not allowed",
-  "refuse to",
-];
+/** 关键词集合（从 keywords.txt 解析而来） */
+export interface RefusalKeywords {
+  /** 全文任意位置命中即判定 */
+  strong: string[];
+  /** 仅在开头 HEAD_LIMIT 字符内命中才判定 */
+  weak: string[];
+}
+
+/** keywords.txt 缺失（或读取失败）时的最小应急词表，避免拦截静默失效 */
+const EMERGENCY_KEYWORDS: RefusalKeywords = {
+  strong: [
+    "i cannot assist",
+    "i can't assist",
+    "i cannot help",
+    "i must refuse",
+    "as a language model",
+  ],
+  weak: [],
+};
+
+/** 解析关键词表文本：段落标记之前的词默认归入 [全文] */
+export function parseKeywords(raw: string): RefusalKeywords {
+  const strong: string[] = [];
+  const weak: string[] = [];
+  let target: "strong" | "weak" = "strong";
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const section = line.match(/^\[(.+?)\]$/);
+    if (section) {
+      target = section[1].includes("开头") ? "weak" : "strong";
+      continue;
+    }
+    if (target === "weak") weak.push(line);
+    else strong.push(line);
+  }
+  return { strong, weak };
+}
+
+/** keywords.txt 路径（与 src/ 平级） */
+function keywordsPath(): string | null {
+  try {
+    const url = import.meta.url;
+    if (typeof url === "string" && url.startsWith("file:")) {
+      return join(dirname(fileURLToPath(url)), "..", "keywords.txt");
+    }
+  } catch {
+    // jiti 变换环境下可能不可用
+  }
+  return null;
+}
+
+let cache: { mtimeMs: number; keywords: RefusalKeywords } | null = null;
+
+/** 加载关键词表（按 mtime 缓存，改文件后无需重启即可生效） */
+export function loadKeywords(): RefusalKeywords {
+  const path = keywordsPath();
+  if (!path) return EMERGENCY_KEYWORDS;
+  try {
+    const stat = statSync(path);
+    if (cache && cache.mtimeMs === stat.mtimeMs) return cache.keywords;
+    const keywords = parseKeywords(readFileSync(path, "utf8"));
+    cache = { mtimeMs: stat.mtimeMs, keywords };
+    return keywords;
+  } catch {
+    return EMERGENCY_KEYWORDS;
+  }
+}
 
 /** pi 会话消息的内容块（结构化子集，避免依赖具体类型导出） */
 export interface ContentBlock {
@@ -91,30 +98,26 @@ export interface AssistantMessageLike {
 
 /**
  * 检测内容是否为拒绝回复。
- * 返回 true 表示命中（强短语 / 开头弱词 / 自定义关键词）。
+ * keywords 默认从 keywords.txt 加载；测试可显式传入以保持确定性。
+ * 返回 true 表示命中（全文段 / 开头段）。
  */
 export function detectRefusal(
   content: string,
-  customKeywords: readonly string[] = [],
+  keywords: RefusalKeywords = loadKeywords(),
 ): boolean {
   if (!content) return false;
 
   const contentLower = content.toLowerCase();
 
-  // 1. 强拒绝短语 - 全文匹配
-  for (const phrase of STRONG_REFUSAL_PHRASES) {
-    if (contentLower.includes(phrase)) return true;
+  // 1. 全文段：任意位置命中即判定
+  for (const phrase of keywords.strong) {
+    if (phrase && contentLower.includes(phrase.toLowerCase())) return true;
   }
 
-  // 2. 弱拒绝关键词 - 仅匹配开头 150 字符
-  const head = contentLower.slice(0, 150);
-  for (const keyword of WEAK_REFUSAL_KEYWORDS) {
-    if (head.includes(keyword)) return true;
-  }
-
-  // 3. 用户自定义关键词 - 全文匹配
-  for (const keyword of customKeywords) {
-    if (keyword && contentLower.includes(keyword.toLowerCase())) return true;
+  // 2. 开头段：仅匹配消息开头 HEAD_LIMIT 字符
+  const head = contentLower.slice(0, HEAD_LIMIT);
+  for (const keyword of keywords.weak) {
+    if (keyword && head.includes(keyword.toLowerCase())) return true;
   }
 
   return false;

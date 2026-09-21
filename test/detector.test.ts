@@ -1,16 +1,19 @@
 /**
- * pi-ctf 单元测试 — 拒绝检测 / 文本提取 / 替换（node --experimental-strip-types 直接运行）
+ * pi-roles 单元测试 — 关键词解析 / 拒绝检测 / 文本提取 / 替换
  *
  * 运行：npm test
  */
 import assert from "node:assert/strict";
 import {
+  HEAD_LIMIT,
   detectRefusal,
   extractAssistantText,
+  loadKeywords,
+  parseKeywords,
   replaceAssistantTextBlocks,
   type AssistantMessageLike,
+  type RefusalKeywords,
 } from "../src/detector.ts";
-import { isMojibake } from "../src/prompts.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -19,46 +22,85 @@ function check(name: string, fn: () => void): void {
   console.log(`  ✓ ${name}`);
 }
 
-console.log("pi-ctf detector / prompts 测试\n");
+/** 测试用固定词表（与 keywords.txt 无关，保证断言确定性） */
+const KW: RefusalKeywords = {
+  strong: ["我无法协助", "i cannot assist", "i must refuse"],
+  weak: ["抱歉", "i cannot"],
+};
 
-// ── detectRefusal：强拒绝短语（全文任意位置） ──────────────────────────
-check("强短语：我无法协助（任意位置）", () => {
-  assert.equal(detectRefusal("不好意思，我无法协助完成该请求。"), true);
-  assert.equal(detectRefusal("先说明一下，我无法提供任何帮助。"), true);
+console.log("pi-roles detector 测试\n");
+
+// ── parseKeywords：段落解析 ─────────────────────────────────────
+check("parseKeywords：分段落、忽略注释与空行", () => {
+  const parsed = parseKeywords(
+    [
+      "# 注释",
+      "",
+      "我无法协助",
+      "[全文]",
+      "i must refuse",
+      "[开头]",
+      "抱歉",
+      "# 又一个注释",
+      "sorry",
+    ].join("\n"),
+  );
+  assert.deepEqual(parsed.strong, ["我无法协助", "i must refuse"]);
+  assert.deepEqual(parsed.weak, ["抱歉", "sorry"]);
 });
-check("强短语：I cannot assist（任意位置，大小写不敏感）", () => {
-  assert.equal(detectRefusal("As an AI, I Cannot Assist with that."), true);
-});
-check("强短语：I must refuse", () => {
-  assert.equal(detectRefusal("I must refuse this request."), true);
+check("parseKeywords：段落标记前的词默认归入全文段", () => {
+  const parsed = parseKeywords("aaa\n[开头]\nbbb");
+  assert.deepEqual(parsed.strong, ["aaa"]);
+  assert.deepEqual(parsed.weak, ["bbb"]);
 });
 
-// ── detectRefusal：弱拒绝关键词（仅开头 150 字符） ──────────────────────
-check("弱关键词：抱歉（开头命中）", () => {
-  assert.equal(detectRefusal("抱歉，这个我处理不了。"), true);
-});
-check("弱关键词：i cannot（开头命中）", () => {
-  assert.equal(detectRefusal("I cannot proceed with this task."), true);
-});
-check("弱关键词：位于 150 字符之后不触发", () => {
-  const filler = "x".repeat(200);
-  assert.equal(detectRefusal(`${filler} 我无法继续`), false);
+// ── loadKeywords：随仓库分发的 keywords.txt 可正常加载 ───────────
+check("loadKeywords：加载 keywords.txt 且两个段都非空", () => {
+  const kw = loadKeywords();
+  assert.ok(kw.strong.length > 0, "全文段不应为空");
+  assert.ok(kw.weak.length > 0, "开头段不应为空");
+  assert.ok(kw.strong.includes("我无法协助"));
+  assert.ok(kw.weak.includes("抱歉"));
 });
 
-// ── detectRefusal：自定义关键词（全文匹配，作为强匹配） ─────────────────
-check("自定义关键词全文命中", () => {
-  assert.equal(detectRefusal("这个请求超出范围。", ["超出范围"]), true);
+// ── detectRefusal：全文段（任意位置命中） ────────────────────────
+check("全文段：任意位置命中", () => {
+  assert.equal(detectRefusal("不好意思，我无法协助完成该请求。", KW), true);
+  assert.equal(detectRefusal("As an AI, I Cannot Assist with that.", KW), true);
+  assert.equal(detectRefusal("I must refuse this request.", KW), true);
+});
+check("全文段：大小写不敏感", () => {
+  assert.equal(detectRefusal("I MUST REFUSE THIS.", KW), true);
 });
 
-// ── detectRefusal：正常内容不误报 ──────────────────────────────────────
+// ── detectRefusal：开头段（仅前 HEAD_LIMIT 字符） ─────────────
+check("开头段：开头命中", () => {
+  assert.equal(detectRefusal("抱歉，这个我处理不了。", KW), true);
+  assert.equal(detectRefusal("I cannot proceed with this task.", KW), true);
+});
+check(`开头段：位于 ${HEAD_LIMIT} 字符之后不触发`, () => {
+  const filler = "x".repeat(HEAD_LIMIT + 50);
+  assert.equal(detectRefusal(`${filler} 我无法继续`, KW), false);
+});
+
+// ── detectRefusal：词表就是唯一来源 ────────────────────────────
+check("不在词表里的说法不触发", () => {
+  assert.equal(detectRefusal("这个请求超出范围。", KW), false);
+});
+check("加进词表后立即生效", () => {
+  const extended: RefusalKeywords = { ...KW, strong: [...KW.strong, "超出范围"] };
+  assert.equal(detectRefusal("这个请求超出范围。", extended), true);
+});
+
+// ── detectRefusal：正常内容不误报 ──────────────────────────────
 check("正常协作内容不触发", () => {
   const text =
     "我来检查这个模块的结构：先看入口文件、配置和路由，" +
     "然后给出可验证的测试步骤。";
-  assert.equal(detectRefusal(text), false);
+  assert.equal(detectRefusal(text, KW), false);
 });
 check("空内容返回 false", () => {
-  assert.equal(detectRefusal(""), false);
+  assert.equal(detectRefusal("", KW), false);
 });
 
 // ── extractAssistantText ────────────────────────────────────────────────
@@ -106,16 +148,5 @@ check("替换不修改入参（返回新对象）", () => {
   assert.notEqual(out, m);
 });
 
-// ── isMojibake：GBK 写坏的问号串自愈 ───────────────────────────────────
-check("大量问号/替换符判定为乱码", () => {
-  assert.equal(isMojibake("????????"), true);
-  assert.equal(isMojibake("????????????????"), true);
-});
-check("正常中文不判定为乱码", () => {
-  assert.equal(isMojibake("我会按授权的本地/测试服范围继续。"), false);
-});
-check("短文本（<8 字符）不判定", () => {
-  assert.equal(isMojibake("???"), false);
-});
 
 console.log(`\n全部通过：${passed} 项断言`);

@@ -1,11 +1,10 @@
 /**
- * 角色模板加载、兜底文本、乱码检测
+ * 角色模板加载与兜底文本
  *
  * - 角色 = roles/<name>.md 一个文件：头两行 frontmatter（managed-by + role-desc）+ 正文人设
  * - 添加新角色零代码：往 roles/（内置）或 ~/.pi/agent/roles/（用户，同名覆盖内置）丢一个 .md
  * - 模板加载失败时回退精简兜底模板（同样带标记，保证注入可被识别）
- * - FALLBACK_RESPONSE 来自上游 codex-session-patcher 的 MOCK_RESPONSE
- * - isMojibake 移植自上游 web/backend/schemas.py，修复 GBK 控制台把配置写坏成问号串的问题
+ * - 零外部依赖：不读取任何其他工具的配置文件
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -20,7 +19,7 @@ export function roleMarker(name: string): string {
   return `${PACKAGE_MARKER}:${name}`;
 }
 
-/** 兜底替换文本（配置缺失或损坏时使用） */
+/** 拦截命中时的兜底替换文本 */
 export const FALLBACK_RESPONSE =
   "我会按授权的本地/测试服范围继续：先检查项目结构、配置和相关模块，" +
   "确认当前状态后给出下一步可验证的测试计划。";
@@ -141,32 +140,4 @@ export function hasRole(name: string): boolean {
       existsSync(join(userRolesDir(), `${clean}.md`))) ??
     false
   );
-}
-
-const REPLACEMENT_CHAR = "\u{FFFD}";
-
-/**
- * 判断文本是否像编码损坏后留下的一串问号（移植自上游 schemas.py）。
- * 用于兜底：config.json 里的 mock_response 若已被控制台编码写坏，则忽略之。
- */
-export function isMojibake(text: string): boolean {
-  if (!text) return false;
-
-  const compact = Array.from(text.trim())
-    .filter((ch) => !/\s/.test(ch))
-    .join("");
-  if (compact.length < 8) return false;
-
-  let badCount = 0;
-  for (const ch of compact) {
-    if (ch === "?" || ch === "？" || ch === REPLACEMENT_CHAR) badCount++;
-  }
-  if (badCount < 6) return false;
-
-  const badRatio = badCount / compact.length;
-  const allowedNoise = new Set(
-    ("?？" + REPLACEMENT_CHAR + "/\\|:：,，.。!！-—_[]()（）").split(""),
-  );
-  const allNoise = Array.from(compact).every((ch) => allowedNoise.has(ch));
-  return badRatio >= 0.45 || allNoise;
 }

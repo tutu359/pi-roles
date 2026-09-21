@@ -1,0 +1,81 @@
+# pi-roles 拦截关键词表
+#
+# 用途：助手回复命中本表中的词，即触发「自动拦截」（把回复替换为兜底文本）。
+# 维护：直接增删本文件即可，无需改代码；改完 /reload 或新开会话生效。
+#
+# 格式：
+#   - 一行一个关键词；'#' 开头是注释；空行忽略；匹配不区分大小写
+#   - [全文] 段落：出现在回复的任意位置即触发
+#   - [开头] 段落：只有出现在回复开头 150 字符内才触发
+#     （这类词比较泛，限制位置是为了避免正文里顺口提一句就被整条替换）
+#
+# 段落标记之前的关键词默认归入 [全文]。
+
+[全文]
+# —— 中文：明确的拒绝表述
+我无法协助
+我无法帮助
+我不能协助
+我不能帮助
+我不能做
+我无法做
+我不会帮
+我无法提供
+违反了我的
+违反我的
+这违反
+我拒绝
+我必须拒绝
+
+# —— 英文：明确的拒绝表述
+i cannot assist
+i can't assist
+i'm unable to assist
+i cannot help
+i can't help
+i'm unable to help
+i must decline
+i must refuse
+against my guidelines
+against my policy
+violates my
+i won't help
+i won't assist
+as an ai
+as a language model
+i apologize, but i
+i'm sorry, but i can't
+not able to provide
+not able to assist
+
+[开头]
+# —— 中文：泛化的致歉/否定开头
+抱歉
+很抱歉
+对不起
+不好意思
+我无法
+我不能
+不允许
+禁止
+
+# —— 中文：省略主语的直接拒绝开场
+不能帮你
+不能协助
+无法帮你
+无法协助你
+不会帮你
+不会帮助
+不能为你
+无法为你
+
+# —— 英文：泛化的致歉/否定开头
+sorry
+apologize
+i cannot
+i can't
+i'm unable
+unable to
+not permitted
+not allowed
+refuse to

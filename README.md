@@ -90,37 +90,49 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 
 保存后立即出现在角色子菜单，选中即可启用。
 
-## 可选：与 codex-session-patcher 联动
+## 拦截关键词表（keywords.txt）
 
-本机存在 `~/.codex-patcher/config.json` 时自动读取（不装则使用内置默认）：
+拦截命中的词全部在仓库根目录的 **`keywords.txt`** 里维护，代码里不写死：
 
-| 字段 | 作用 |
-| --- | --- |
-| `mock_response` | 拦截后的兜底替换文本（问号乱码自动忽略） |
-| `custom_keywords` | 自定义拒绝检测关键词（各语言合并，全文匹配） |
-| `ctf_prompts.pi.prompt` | 覆盖 ctf 角色的模板 |
+```text
+[全文]
+我无法协助          # 出现在回复任意位置即触发
+...
+
+[开头]
+抱歉                # 仅在回复开头 150 字符内触发（避免误伤）
+...
+```
+
+- 增删词直接改文件，不需要改代码；改完 `/reload` 或新开会话生效
+- 一行一个词，`#` 开头的行是注释，空行忽略，匹配不区分大小写
+- 段落标记之前的关键词默认归入 `[全文]`
+- 文件缺失时使用最小应急词表（避免拦截静默失效）
+- 拦截后的替换文本目前固定为内置兜底句
 
 ## 开发
 
 ```bash
 pnpm install        # 安装 devDeps（typescript / @types/node / pi 类型）
 pnpm typecheck      # tsc --noEmit
-pnpm test           # node --experimental-strip-types 直接运行单元测试（30 项断言）
+pnpm test           # node --experimental-strip-types 直接运行单元测试（26 项断言）
 ```
 
 源码结构：
 
 ```text
 pi-roles/
-├── index.ts              # 入口：/role 两级菜单、启动旗标、角色注入、拦截（联动）、状态持久化
+├── index.ts              # 入口：/role 两级菜单、角色注入、拦截、状态持久化
+├── keywords.txt          # ⭐ 拦截关键词表（命中即触发拦截）
 ├── roles/                # ⭐ 角色模板目录（放 .md = 一个角色）
-│   └── ctf.md            # CTF 角色（标记 pi-roles:ctf）
+│   ├── ctf.md            # CTF 角色（标记 pi-roles:ctf）
+│   ├── interviewer.md    # 模拟面试官
+│   └── tutor.md          # 教学导师
 ├── src/
-│   ├── state.ts          # 状态机纯函数（菜单/旗标/恢复共用；可单测）
-│   ├── prompts.ts        # 角色加载/发现（内置 + ~/.pi/agent/roles/）+ 兜底文本 + 乱码检测
-│   ├── detector.ts       # 两级拒绝检测器 + 文本提取/替换
-│   └── config.ts         # 可选读取 ~/.codex-patcher/config.json
-└── test/                 # detector + state 单元测试（30 项断言）
+│   ├── state.ts          # 状态机纯函数（菜单/会话恢复共用；可单测）
+│   ├── prompts.ts        # 角色加载/发现（内置 + ~/.pi/agent/roles/）+ 兜底文本
+│   └── detector.ts       # 关键词表加载/解析 + 拒绝检测 + 文本提取/替换
+└── test/                 # detector + state 单元测试（26 项断言）
 ```
 
 ### E2E 验证
