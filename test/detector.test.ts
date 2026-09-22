@@ -8,6 +8,7 @@ import {
   HEAD_LIMIT,
   detectRefusal,
   extractAssistantText,
+  findRefusalMatch,
   loadKeywords,
   parseKeywords,
   replaceAssistantTextBlocks,
@@ -94,6 +95,29 @@ check(`开头段：位于 ${HEAD_LIMIT} 字符之后不触发`, () => {
 });
 
 // ── detectRefusal：词表就是唯一来源 ────────────────────────────
+check("findRefusalMatch：返回命中的词与所在段", () => {
+  assert.deepEqual(findRefusalMatch("先说明，我无法协助完成该请求", KW), {
+    keyword: "我无法协助",
+    tier: "全文",
+  });
+  assert.deepEqual(findRefusalMatch("i cannot proceed", KW), {
+    keyword: "i cannot",
+    tier: "开头",
+  });
+});
+check("findRefusalMatch：未命中返回 null", () => {
+  assert.equal(findRefusalMatch("这是一段正常的技术回答", KW), null);
+  assert.equal(findRefusalMatch("", KW), null);
+});
+check("findRefusalMatch：全文段优先于开头段", () => {
+  // 开头有「抱歉」，但全文段词也存在 → 应先报到全文段
+  const kw: RefusalKeywords = { strong: ["我无法协助"], weak: ["抱歉"] };
+  assert.deepEqual(findRefusalMatch("抱歉，我无法协助你", kw), {
+    keyword: "我无法协助",
+    tier: "全文",
+  });
+});
+
 check("不在词表里的说法不触发", () => {
   assert.equal(detectRefusal("这个请求超出范围。", KW), false);
 });

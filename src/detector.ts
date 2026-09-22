@@ -97,30 +97,50 @@ export interface AssistantMessageLike {
 }
 
 /**
- * 检测内容是否为拒绝回复。
+ * 检测内容是否为拒绝回复（findRefusalMatch 的布尔包装）。
  * keywords 默认从 keywords.txt 加载；测试可显式传入以保持确定性。
- * 返回 true 表示命中（全文段 / 开头段）。
  */
 export function detectRefusal(
   content: string,
   keywords: RefusalKeywords = loadKeywords(),
 ): boolean {
-  if (!content) return false;
+  return findRefusalMatch(content, keywords) !== null;
+}
+
+/** 命中的拒绝词及其所在段（用于告知“为什么被拦”） */
+export interface RefusalMatch {
+  keyword: string;
+  tier: "全文" | "开头";
+}
+
+/**
+ * 查找命中的拒绝词；未命中返回 null。
+ * 与 detectRefusal 同一套规则（先全文段，再开头段）。
+ */
+export function findRefusalMatch(
+  content: string,
+  keywords: RefusalKeywords = loadKeywords(),
+): RefusalMatch | null {
+  if (!content) return null;
 
   const contentLower = content.toLowerCase();
 
   // 1. 全文段：任意位置命中即判定
   for (const phrase of keywords.strong) {
-    if (phrase && contentLower.includes(phrase.toLowerCase())) return true;
+    if (phrase && contentLower.includes(phrase.toLowerCase())) {
+      return { keyword: phrase, tier: "全文" };
+    }
   }
 
   // 2. 开头段：仅匹配消息开头 HEAD_LIMIT 字符
   const head = contentLower.slice(0, HEAD_LIMIT);
   for (const keyword of keywords.weak) {
-    if (keyword && head.includes(keyword.toLowerCase())) return true;
+    if (keyword && head.includes(keyword.toLowerCase())) {
+      return { keyword, tier: "开头" };
+    }
   }
 
-  return false;
+  return null;
 }
 
 /** 从 assistant 消息中提取全部 text 块文本（用换行拼接） */

@@ -20,8 +20,8 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
-  detectRefusal,
   extractAssistantText,
+  findRefusalMatch,
   replaceAssistantTextBlocks,
 } from "./src/detector.ts";
 import {
@@ -44,6 +44,28 @@ const STATE_ENTRY_TYPE = "pi-roles-state";
 /** 状态条标识 */
 const STATUS_KEY = "pi-roles";
 
+/** 拦截记录条目类型（渲染在聊天记录里，不进入 LLM 上下文） */
+const INTERCEPT_ENTRY_TYPE = "pi-roles-intercept";
+
+/** 拦截记录内容 */
+interface InterceptRecord {
+  /** 命中的词 */
+  keyword: string;
+  /** 命中所在段（全文 / 开头） */
+  tier: string;
+  /** 当时的角色 */
+  role: string | null;
+  /** 被替换掉的完整原文 */
+  original: string;
+}
+
+/** 取文本单行预览（折叠空白 + 截断） */
+function previewOf(text: string, max = 80): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  const chars = Array.from(oneLine);
+  return chars.length > max ? chars.slice(0, max).join("") + "…" : oneLine;
+}
+
 /** 事件与命令处理器共用的最小 UI 上下文（ExtensionContext / ExtensionCommandContext 均可赋值） */
 type UiCtx = Pick<ExtensionContext, "hasUI" | "ui">;
 
@@ -51,6 +73,30 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   // ── 会话内状态（默认：无角色 · 追加模式 · 自动拦截关闭） ───────────────────
   let state: RoleState = defaultRoleState();
   let intercepted = 0; // 本会话拦截计数
+
+  // 拦截记录渲染：显示在聊天记录里（不进 LLM 上下文），展开可看完整原文
+  pi.registerEntryRenderer<InterceptRecord>(
+    INTERCEPT_ENTRY_TYPE,
+    (entry, { expanded }, theme) => {
+      const data = entry.data;
+      if (!data) return undefined;
+      const { keyword, tier, role, original } = data;
+      const header = theme.fg(
+        "warning",
+        `🛡 已自动拦截 · 命中「${keyword}」（${tier}匹配）${
+          role ? ` · 角色 ${role}` : ""
+        }`,
+      );
+      const body = expanded
+        ? original.split("\n").map((line: string) => theme.fg("dim", `   │ ${line}`))
+        : [theme.fg("dim", `   │ 原文：${previewOf(original)}`)];
+      const lines = [header, ...body];
+      return {
+        render: () => lines,
+        invalidate: () => {},
+      };
+    },
+  );
 
   // ─── 工具函数 ───────────────────────────────────────────────────────────
 
@@ -321,13 +367,27 @@ export default function piRolesExtension(pi: ExtensionAPI) {
     const fallback = FALLBACK_RESPONSE;
     if (text.trim() === fallback.trim()) return undefined; // 已是兜底文本，避免重复处理
 
-    if (!detectRefusal(text)) return undefined;
+    const match = findRefusalMatch(text);
+    if (!match) return undefined;
 
     const replaced = replaceAssistantTextBlocks(message, fallback);
     intercepted += 1;
+
+    // 落一条拦截记录：渲染在聊天记录里（不进 LLM 上下文），展开可看完整原文
+    try {
+      pi.appendEntry<InterceptRecord>(INTERCEPT_ENTRY_TYPE, {
+        keyword: match.keyword,
+        tier: match.tier,
+        role: state.role,
+        original: text,
+      });
+    } catch {
+      // 记录失败不影响拦截本身
+    }
+
     notify(
       ctx,
-      `🛡 已拦截拒绝回复 · 累计 ${intercepted}`,
+      `🛡 已拦截 · 命中「${match.keyword}」（${match.tier}匹配）`,
       "warning",
     );
     return { message: replaced };
