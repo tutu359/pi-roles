@@ -10,8 +10,9 @@
 | 模式 | 用途 | 行为 |
 | --- | --- | --- |
 | **append（默认）** | 日常 / 委派 | 在现有系统提示词**末尾追加**角色模板，原生剧本与父上下文完整保留 |
-| **replace** | 主会话强场景 | 用角色模板**替换** pi 内置默认剧本；**AGENTS.md 与 skill 清单仍保留** |
+| **replace** | 主会话强场景 | 用角色模板**替换** pi 内置默认剧本（身份 + `<tools>` + `<rules>` + `<docs>`）；`<project_context>` / `<skills>` / `<cwd>` 等事实层由 pi 自动接上 |
 
+- replace 走 pi 原生的 `systemPromptOptions.customPrompt`（即 `--system-prompt` 同一字段），只换「剧本」不丢「事实」，也不做整体强制替换
 - 交互收敛为**两条通道**：`/role` 菜单（选择/设置）+ 启动旗标（`--role <name>`）
 - 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条常驻 `[ctf]·replace·🛡`（角色名主题高亮色，括号/分隔点淡色，模式中间调）
 - 内置角色：`ctf`（CTF/渗透测试三层工作流）、`tutor`（教学导师，苏格拉底式引导）、`interviewer`（模拟面试官，出题+点评）

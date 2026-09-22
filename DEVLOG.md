@@ -74,6 +74,30 @@
 - 通知同步带上命中词：`🛡 已拦截 · 命中「不能帮你」（开头匹配）`
 - 记录原文，追查误判不再依赖记忆
 
+### v0.4.6 replace 模式改用 pi 原生 `customPrompt`（修复丢 cwd / skill 残缺）
+
+实测量出旧实现的缺陷（旧做法：手工拼「角色模板 + project_context + skills」，然后 `return { systemPrompt }` 整体强制替换）：
+
+| 缺陷 | 证据 |
+| --- | --- |
+| 丢 `<cwd>` | 默认提示词结尾有 `<cwd>…</cwd>`，我们拼的三段里没有 |
+| skill 段残缺 | 原生是 `<skill><name>…<description>…<location>/…/SKILL.md</location></skill>`；我们只写 `- name: desc`，**无 location → 模型读不到 skill 文件** |
+| 整体强制替换 | 走 `forceSystemPrompt` 路径，缓存全失效 + transcript 无结构化分段 |
+| 丢 `--append-system-prompt` | 同一条路径被覆盖 |
+
+**新实现**（`src/inject.ts` 纯函数 + 6 项单测）：
+
+```ts
+event.systemPromptOptions.customPrompt = 角色模板;  // 只换默认剧本
+return undefined;                                   // 事实层由 pi 自动接上
+```
+
+E2E 实测（探针直接调用 `applyRolePrompt`）：角色模板在开头 ✅ / `<project_context>` 保留 ✅ / `<skills>` 含 `<location>` ✅ / `<cwd>` 回来 ✅ / 内置剧本已换掉 ✅。代码减少约 30 行手工重建。
+
+**实测结论（顺带回答“不带 `<tools>` 能不能调工具”）**：把 `customPrompt` 设为「你是测试助手。」（零工具说明）后，模型仍成功 `read` 到 `package.json` 的 `0.4.0` —— 工具声明走 API 的 `tools` 参数，与系统提示词是两条独立通道；`<tools>` 段只是速查表 + 使用规矩。
+
+**待定**：skills 段是否随 replace 带（原生 172 行 / 13,820 字符，占提示词一半以上，且多为 ego-browser/obsidian 这类角色场景用不上的）。
+
 ### v0.4.5 菜单通知改为「退出时报一次结果」
 
 用户指出：选角色的即时通知会报出**马上就会被改掉的模式**（选了 tutor 弹「已启用 tutor · append」，随后切成 replace，通知就过期了）。

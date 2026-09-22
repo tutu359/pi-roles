@@ -24,6 +24,7 @@ import {
   findRefusalMatch,
   replaceAssistantTextBlocks,
 } from "./src/detector.ts";
+import { applyRolePrompt } from "./src/inject.ts";
 import {
   FALLBACK_RESPONSE,
   listRoles,
@@ -334,36 +335,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event) => {
     if (!state.role) return undefined;
-    const prompt = getRolePrompt(state.role);
-    if (state.mode === "replace") {
-      // 替换模式：以角色模板为基底，但保留 AGENTS.md 等上下文文件与 skill 清单
-      // （对齐 pi 原生 --system-prompt 语义：只替换内置默认剧本，不屏蔽用户自己的上下文）
-      const parts: string[] = [prompt];
-      const opts = event.systemPromptOptions;
-      const contextFiles = opts?.contextFiles ?? [];
-      if (contextFiles.length > 0) {
-        parts.push(
-          "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n",
-        );
-        for (const file of contextFiles) {
-          parts.push(
-            `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>\n\n`,
-          );
-        }
-        parts.push("</project_context>\n");
-      }
-      const skills = opts?.skills ?? [];
-      if (skills.length > 0) {
-        const skillLines = skills
-          .map((s: { name?: string; description?: string }) =>
-            `- ${s.name ?? "?"}: ${s.description ?? ""}`.trimEnd(),
-          )
-          .join("\n");
-        parts.push(`\n## Available skills\n\n${skillLines}\n`);
-      }
-      return { systemPrompt: parts.join("") };
-    }
-    return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
+    return applyRolePrompt(event, state.mode, getRolePrompt(state.role));
   });
 
   // ─── 实时拒绝拦截（随角色联动：总闸开 && 有角色才生效） ─────────────────────

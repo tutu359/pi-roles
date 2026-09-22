@@ -10,7 +10,7 @@
     ]
   },
   "scripts": {
-    "test": "node --experimental-strip-types test/detector.test.ts && node --experimental-strip-types test/state.test.ts",
+    "test": "node --experimental-strip-types test/detector.test.ts && node --experimental-strip-types test/state.test.ts && node --experimental-strip-types test/inject.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
