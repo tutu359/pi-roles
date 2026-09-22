@@ -60,7 +60,17 @@ check("loadKeywords：加载 keywords.txt 且两个段都非空", () => {
   assert.ok(kw.strong.length > 0, "全文段不应为空");
   assert.ok(kw.weak.length > 0, "开头段不应为空");
   assert.ok(kw.strong.includes("我无法协助"));
-  assert.ok(kw.weak.includes("抱歉"));
+  assert.ok(kw.weak.includes("不能帮你"));
+});
+check("loadKeywords：日常致歉/泛化否定词不得进入词表（防误拦）", () => {
+  const kw = loadKeywords();
+  const daily = ["抱歉", "很抱歉", "对不起", "不好意思", "我无法", "我不能", "不允许", "禁止", "sorry", "apologize", "i cannot", "unable to", "not allowed"];
+  for (const word of daily) {
+    assert.ok(
+      !kw.strong.includes(word) && !kw.weak.includes(word),
+      `日常用语「${word}」不应在词表中`,
+    );
+  }
 });
 
 // ── detectRefusal：全文段（任意位置命中） ────────────────────────

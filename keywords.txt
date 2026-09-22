@@ -49,17 +49,10 @@ not able to provide
 not able to assist
 
 [开头]
-# —— 中文：泛化的致歉/否定开头
-抱歉
-很抱歉
-对不起
-不好意思
-我无法
-我不能
-不允许
-禁止
-
-# —— 中文：省略主语的直接拒绝开场
+# —— 只保留「拒绝为你做某事」这类明确的拒绝开场
+# 注意：致歉词（抱歉 / sorry / apologize）与泛化否定（我无法 / 不允许 / 禁止 /
+# not allowed）不要放进来 —— 它们是日常工作语言，开头命中会把正常回复整条替换掉
+# （已实测误伤案例：模型回复「抱歉，我刚才…」被当作拒绝拦截）。
 不能帮你
 不能协助
 无法帮你
@@ -68,14 +61,4 @@ not able to assist
 不会帮助
 不能为你
 无法为你
-
-# —— 英文：泛化的致歉/否定开头
-sorry
-apologize
-i cannot
-i can't
-i'm unable
-unable to
-not permitted
-not allowed
 refuse to
