@@ -15,7 +15,7 @@
 - replace 走 pi 原生的 `systemPromptOptions.customPrompt`（即 `--system-prompt` 同一字段），只换「剧本」不丢「事实」，也不做整体强制替换
 - 交互只有一条通道：`/role` 菜单（选角色 + 模式 + 拦截）；启动旗标已移除，方案待重新设计
 - 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条常驻 `[ctf]·replace·🛡`（角色名主题高亮色，括号/分隔点淡色，模式中间调）
-- 内置角色：`ctf` / `tutor` / `interviewer`（角色内容见 `roles/`）
+- 内置角色：`ctf` / `tutor` / `interviewer` / `money`（角色内容见 `roles/`）
 - **自定义角色**：`~/.pi/agent/roles/<name>.md`（同名覆盖内置）
 
 ### 2. 实时拒绝拦截（随角色联动）
