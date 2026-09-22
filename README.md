@@ -1,6 +1,6 @@
 # pi-roles — 角色模板系统
 
-> 从 [pi-session-patcher](../.pi/agent/extensions/pi-session-patcher) fork 独立的 pi 扩展。
+> 从 pi-session-patcher fork 独立的 pi 扩展。
 > 以「角色」为单位管理提示词模板：**一个角色 = `roles/<name>.md` 一个文件，放目录即自动出现，添加角色零代码**。
 
 ## 功能
@@ -15,7 +15,7 @@
 - replace 走 pi 原生的 `systemPromptOptions.customPrompt`（即 `--system-prompt` 同一字段），只换「剧本」不丢「事实」，也不做整体强制替换
 - 交互只有一条通道：`/role` 菜单（选角色 + 模式 + 拦截）；启动旗标已移除，方案待重新设计
 - 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条常驻 `[ctf]·replace·🛡`（角色名主题高亮色，括号/分隔点淡色，模式中间调）
-- 内置角色：`ctf`（CTF/渗透测试三层工作流）、`tutor`（教学导师，苏格拉底式引导）、`interviewer`（模拟面试官，出题+点评）
+- 内置角色：`ctf` / `tutor` / `interviewer`（角色内容见 `roles/`）
 - **自定义角色**：`~/.pi/agent/roles/<name>.md`（同名覆盖内置）
 
 ### 2. 实时拒绝拦截（随角色联动）
@@ -107,13 +107,14 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 ...
 
 [开头]
-抱歉                # 仅在回复开头 150 字符内触发（避免误伤）
+不能帮你            # 仅在回复开头 150 字符内触发（避免误伤）
 ...
 ```
 
-- 增删词直接改文件，不需要改代码；改完 `/reload` 或新开会话生效
+- 增删词直接改文件，不需要改代码；改完**立即生效**（按文件 mtime 自动重载，无需重启会话）
 - 一行一个词，`#` 开头的行是注释，空行忽略，匹配不区分大小写
 - 段落标记之前的关键词默认归入 `[全文]`
+- `[开头]` 段只放「明确拒绝为你做某事」的说法；致歉词（抱歉 / sorry / apologize）与泛化否定（我无法 / not allowed）**不放**，避免正常回复被整条替换
 - 文件缺失时使用最小应急词表（避免拦截静默失效）
 - 拦截后的替换文本目前固定为内置兜底句
 
@@ -122,7 +123,7 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 ```bash
 pnpm install        # 安装 devDeps（typescript / @types/node / pi 类型）
 pnpm typecheck      # tsc --noEmit
-pnpm test           # node --experimental-strip-types 直接运行单元测试（26 项断言）
+pnpm test           # node --experimental-strip-types 直接运行单元测试（36 项断言）
 ```
 
 源码结构：
@@ -132,20 +133,21 @@ pi-roles/
 ├── index.ts              # 入口：/role 两级菜单、角色注入、拦截、状态持久化
 ├── keywords.txt          # ⭐ 拦截关键词表（命中即触发拦截）
 ├── roles/                # ⭐ 角色模板目录（放 .md = 一个角色）
-│   ├── ctf.md            # CTF 角色（标记 pi-roles:ctf）
+│   ├── ctf.md            # CTF 角色
 │   ├── interviewer.md    # 模拟面试官
 │   └── tutor.md          # 教学导师
 ├── src/
 │   ├── state.ts          # 状态机纯函数（菜单/会话恢复共用；可单测）
 │   ├── prompts.ts        # 角色加载/发现（内置 + ~/.pi/agent/roles/）+ 兜底文本
-│   └── detector.ts       # 关键词表加载/解析 + 拒绝检测 + 文本提取/替换
-└── test/                 # detector + state 单元测试（26 项断言）
+│   ├── inject.ts         # 角色提示词注入（replace 走 customPrompt / append 追加）
+│   └── detector.ts       # 关键词表加载/解析 + 拒绝检测（含命中词）+ 文本提取/替换
+└── test/                 # detector + state + inject 单元测试（36 项断言）
 ```
 
 ### E2E 验证
 
 ```bash
-mkdir -p /tmp/ctf-verify
+mkdir -p tmp   # 临时探针放工作目录内
 # 扩展能加载：pi -ne -p -e index.ts "Reply with exactly: ok" → 期望输出 ok
 # 注入类（追加/替换）需在交互模式里用 /role 选角色后观察（旗标已移除，print 模式无法指定角色）
 # 拦截联动：有角色 + 拦截开 → 拒绝回复被换成兜底文本，聊天记录出现 🛡 命中记录
@@ -164,6 +166,6 @@ mkdir -p /tmp/ctf-verify
 
 ## 局限
 
-- 实时拦截只保护本会话新产生的消息；历史会话批量清理请用上游 codex-session-patcher Web UI
-- 拦截基于文本特征匹配，存在理论误报；每次拦截都会通知，可关闭
+- 实时拦截只保护本会话新产生的消息（历史会话不在处理范围）
+- 拦截基于文本特征匹配，存在理论误报；每次拦截都会弹通知，并在聊天记录里留下 🛡 记录（含命中词与被替换的原文，可展开），可据此回溯误判
 - 无法突破平台最高安全策略，效果因模型版本而异
