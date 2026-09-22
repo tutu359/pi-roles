@@ -73,6 +73,7 @@ export default function piRolesExtension(pi: ExtensionAPI) {
   // ── 会话内状态（默认：无角色 · 追加模式 · 自动拦截关闭） ───────────────────
   let state: RoleState = defaultRoleState();
   let intercepted = 0; // 本会话拦截计数
+  let menuChanged = false; // 本次菜单会话是否改动过（决定 Esc 退出时是否报结果）
 
   // 拦截记录渲染：显示在聊天记录里（不进 LLM 上下文），展开可看完整原文
   pi.registerEntryRenderer<InterceptRecord>(
@@ -162,6 +163,14 @@ export default function piRolesExtension(pi: ExtensionAPI) {
 
   // ─── 菜单 ───────────────────────────────────────────────────────────────
 
+  /** 菜单退出时的结果摘要（此时所有选择已确定，不会过期） */
+  function menuSummary(): string {
+    if (!state.role) return "未启用角色";
+    return `已启用 ${state.role} · ${state.mode} · 自动拦截${
+      state.intercept ? "开" : "关"
+    }`;
+  }
+
   /** 截断描述文本（按字符计，超长加省略号） */
   function truncateDesc(text: string, max = 40): string {
     const chars = Array.from(text);
@@ -195,15 +204,16 @@ export default function piRolesExtension(pi: ExtensionAPI) {
       state = applyRoleState(state, { type: "selectRole", role: role.name });
       persistState();
       applyStatus(ctx);
-      notify(ctx, `✅ 已启用 ${role.name} · ${state.mode}`);
+      menuChanged = true;
       // 返回主菜单，便于继续调整模式/拦截
     } catch {
       notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
     }
   }
 
-  /** 外层主菜单：角色入口 + 模式单选 + 自动拦截；Esc 退出 */
+  /** 外层主菜单：角色入口 + 模式单选 + 自动拦截；Esc 退出时统一报一次结果 */
   async function mainMenu(ctx: UiCtx): Promise<void> {
+    menuChanged = false;
     for (;;) {
       const label = (name: string, value = ""): string =>
         value ? `${name}  ${value}` : name;
@@ -220,7 +230,11 @@ export default function piRolesExtension(pi: ExtensionAPI) {
         notify(ctx, "菜单不可用，已取消（未做任何变更）", "warning");
         return;
       }
-      if (picked === undefined) return; // Esc 退出
+      if (picked === undefined) {
+        // Esc 退出：改动过才报一次最终状态（没改就不打扰）
+        if (menuChanged) notify(ctx, menuSummary());
+        return;
+      }
       const idx = items.indexOf(picked);
       if (idx === 0) {
         await roleSubMenu(ctx);
@@ -228,18 +242,17 @@ export default function piRolesExtension(pi: ExtensionAPI) {
         state = applyRoleState(state, { type: "setMode", mode: "append" });
         persistState();
         applyStatus(ctx);
+        menuChanged = true;
       } else if (idx === 2) {
         state = applyRoleState(state, { type: "setMode", mode: "replace" });
         persistState();
         applyStatus(ctx);
+        menuChanged = true;
       } else if (idx === 3) {
         state = applyRoleState(state, { type: "toggleIntercept" });
         persistState();
         applyStatus(ctx);
-        notify(
-          ctx,
-          state.intercept ? "自动拦截已开启" : "自动拦截已关闭",
-        );
+        menuChanged = true;
       }
     }
   }
