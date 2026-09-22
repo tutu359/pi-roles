@@ -13,7 +13,7 @@
 | **replace** | 主会话强场景 | 用角色模板**替换** pi 内置默认剧本（身份 + `<tools>` + `<rules>` + `<docs>`）；`<project_context>` / `<skills>` / `<cwd>` 等事实层由 pi 自动接上 |
 
 - replace 走 pi 原生的 `systemPromptOptions.customPrompt`（即 `--system-prompt` 同一字段），只换「剧本」不丢「事实」，也不做整体强制替换
-- 交互收敛为**两条通道**：`/role` 菜单（选择/设置）+ 启动旗标（`--role <name>`）
+- 交互只有一条通道：`/role` 菜单（选角色 + 模式 + 拦截）；启动旗标已移除，方案待重新设计
 - 状态与模式按会话持久化，`pi -c` / resume 自动恢复；状态条常驻 `[ctf]·replace·🛡`（角色名主题高亮色，括号/分隔点淡色，模式中间调）
 - 内置角色：`ctf`（CTF/渗透测试三层工作流）、`tutor`（教学导师，苏格拉底式引导）、`interviewer`（模拟面试官，出题+点评）
 - **自定义角色**：`~/.pi/agent/roles/<name>.md`（同名覆盖内置）
@@ -41,7 +41,7 @@ pi install git:github.com/tutu359/pi-roles
 # 方式二：复制到全局扩展目录
 cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 
-# 方式三（开发调试，不安装）：pi --role ctf -e ~/Desktop/TestCC/pi-roles/index.ts …
+# 方式三（开发调试，不安装）：pi -ne -e ~/Desktop/TestCC/pi-roles/index.ts   然后 /role 选角色
 ```
 
 ## 使用
@@ -77,16 +77,9 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 - 选角色后返回主菜单，便于继续调整模式/拦截；状态条实时更新
 - **菜单里改什么都不弹通知；Esc 退出时统一报一次最终结果**（如 `已启用 tutor · append · 自动拦截开`），此时所有选择已确定、不会过期；菜单内没有改动则不打扰
 
-### CLI 旗标（需放在其他旗标之前）
+### 启动旗标
 
-| 旗标 | 说明 |
-| --- | --- |
-| `pi --role <name>` | 指定角色启动（默认追加模式），如 `--role ctf` |
-| `pi --role-append <name>` | 指定角色 + 追加模式（显式，委派场景） |
-| `pi --role-mode replace\|append` | 模式覆盖 |
-| `pi --ctfr` | 快捷：ctf 角色 + 替换模式 |
-| `pi --ctfa` / `--ctf` | 快捷：ctf 角色 + 追加模式 |
-| `pi --ctf-mode replace\|append` | `--role-mode` 的旧名（兼容） |
+**暂无**：角色与模式都在 `/role` 菜单内切换（旗标方案待重新设计）。
 
 ## 添加新角色（零代码）
 
@@ -149,11 +142,9 @@ pi-roles/
 
 ```bash
 mkdir -p /tmp/ctf-verify
-# 追加（默认）：pi --role ctf -ne -p -e /tmp/ctf-verify/probe.ts -e index.ts "Reply with exactly: ok"
-#   期望：{ ctfInjected: true, defaultPromptPresent: true（原生剧本保留）}
-# 替换：pi --ctfr … 期望 defaultPromptPresent: false
-# 无角色：pi -e index.ts … 期望 ctfInjected: false
-# 拦截联动：无角色 → 拒绝回复原样；--role ctf → 输出兜底文本
+# 扩展能加载：pi -ne -p -e index.ts "Reply with exactly: ok" → 期望输出 ok
+# 注入类（追加/替换）需在交互模式里用 /role 选角色后观察（旗标已移除，print 模式无法指定角色）
+# 拦截联动：有角色 + 拦截开 → 拒绝回复被换成兜底文本，聊天记录出现 🛡 命中记录
 ```
 
 ## 与上游 pi-session-patcher 的差异
@@ -162,7 +153,7 @@ mkdir -p /tmp/ctf-verify
 | --- | --- | --- |
 | 定位 | CTF 注入 + 拦截 | **角色模板系统**（CTF 只是第一个角色） |
 | 添加场景 | 改代码改模板 | 丢一个 `.md` 到 `roles/` |
-| 交互 | `/ctf` 单菜单 + 命令直切 | **/role 两级菜单** + 启动旗标 |
+| 交互 | `/ctf` 单菜单 + 命令直切 | **/role 两级菜单** |
 | 默认模式 | append（v0.3.0 曾改 replace） | **append** |
 | 拦截默认 | 全局开启 | **总闸 + 有角色才生效** |
 | 注入标记 | `codex-session-patcher:pi-ctf` | `pi-roles:<role>` |

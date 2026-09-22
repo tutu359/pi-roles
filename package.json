@@ -1,7 +1,7 @@
 {
   "name": "pi-roles",
   "version": "0.4.0",
-  "description": "Pi 角色模板系统：一个角色 = roles/<name>.md 一个文件。/role 菜单���外层：追加/替换模式 + 自动拦截 → 角色子菜单）与启动旗标（--role <name>）两条通道；append 追加（默认，保留原生剧本）/ replace 替换系统提示词；实时拒绝拦截随角色联动。从 pi-session-patcher fork 独立。",
+  "description": "Pi 角色模板系统：一个角色 = roles/<name>.md 一个文件，丢进目录即生效；/role 菜单选角色（append 追加 / replace 替换内置剧本）+ 自动拦截；拦截命中会在聊天记录里标出命中词与原文。从 pi-session-patcher fork 独立。",
   "type": "module",
   "license": "MIT",
   "pi": {
