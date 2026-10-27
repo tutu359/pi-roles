@@ -115,6 +115,8 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 - 一行一个词，`#` 开头的行是注释，空行忽略，匹配不区分大小写
 - 段落标记之前的关键词默认归入 `[全文]`
 - `[开头]` 段只放「明确拒绝为你做某事」的说法；致歉词（抱歉 / sorry / apologize）与泛化否定（我无法 / not allowed）**不放**，避免正常回复被整条替换
+- 收录两类拒绝：① 标准拒绝话术（我无法协助 / i must refuse …）② **以「授权范围 / 沙箱越界」为由拒绝继续**（这不属于授权范围 / 不在授权范围 / 未获授权 / 这不是沙箱目标 …）
+  ② 类只收「拒绝 + 授权缺失」的组合式；裸词（未授权 / 未授权第三方 / 可能触犯）**不收**——它们会出现在「仍在推进工作」的安全解释回复里
 - 文件缺失时使用最小应急词表（避免拦截静默失效）
 - 拦截后的替换文本目前固定为内置兜底句
 
@@ -123,7 +125,7 @@ cp -r ~/Desktop/TestCC/pi-roles ~/.pi/agent/extensions/pi-roles
 ```bash
 pnpm install        # 安装 devDeps（typescript / @types/node / pi 类型）
 pnpm typecheck      # tsc --noEmit
-pnpm test           # node --experimental-strip-types 直接运行单元测试（36 项断言）
+pnpm test           # node --experimental-strip-types 直接运行单元测试（41 项断言）
 ```
 
 源码结构：

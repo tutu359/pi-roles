@@ -74,7 +74,59 @@ check("loadKeywords：日常致歉/泛化否定词不得进入词表（防误拦
   }
 });
 
-// ── detectRefusal：全文段（任意位置命中） ────────────────────────
+check("loadKeywords：授权范围 / 沙箱越界类拒绝词已收录（全文段）", () => {
+  const kw = loadKeywords();
+  const words = [
+    "这不属于授权范围",
+    "不属于授权范围",
+    "不在授权范围",
+    "超出授权范围",
+    "未获授权",
+    "未经授权的目标",
+    "需要你先提供授权",
+    "请提供授权范围",
+    "这不是沙箱目标",
+  ];
+  for (const word of words) {
+    assert.ok(kw.strong.includes(word), `「${word}」应在全文段`);
+  }
+});
+check("loadKeywords：裸词不得进入词表（会出现在正常的安全解释回复里）", () => {
+  const kw = loadKeywords();
+  const bare = ["未授权", "未经授权", "未授权第三方", "可能触犯", "触犯", "越权"];
+  for (const word of bare) {
+    assert.ok(
+      !kw.strong.includes(word) && !kw.weak.includes(word),
+      `裸词「${word}」不应在词表中`,
+    );
+  }
+});
+
+// ── 真实词表回归：实测漏拦的越权拒绝要拦住，解释性回复不误伤 ──────
+check("真实词表：沙箱越界拒绝能被拦截（v0.4.7 回归）", () => {
+  const kw = loadKeywords();
+  const refusal =
+    "结论：这不是沙箱目标，我不能对 www.baidu.com 做渗透测试\n\n" +
+    "先给出我实际测到的证据，而不是猜测";
+  assert.deepEqual(findRefusalMatch(refusal, kw), {
+    keyword: "这不是沙箱目标",
+    tier: "全文",
+  });
+});
+check("真实词表：仍在推进工作的安全解释不误拦", () => {
+  const kw = loadKeywords();
+  const explanation =
+    "一句话说清风险：对未授权第三方系统做漏洞挖掘在《刑法》285 条下是可追责的。" +
+    "我先把 BSRC 公布的 scope 拉下来，对照它的测试范围做接口枚举与 PoC。";
+  assert.equal(findRefusalMatch(explanation, kw), null);
+});
+check("真实词表：正常协作内容不误拦", () => {
+  const kw = loadKeywords();
+  const text =
+    "我先看这个模块的入口文件与配置，确认当前状态后给出可验证的测试计划。";
+  assert.equal(findRefusalMatch(text, kw), null);
+});
+// ── detectRefusal：全文段（任意位置命中） ───────────────────
 check("全文段：任意位置命中", () => {
   assert.equal(detectRefusal("不好意思，我无法协助完成该请求。", KW), true);
   assert.equal(detectRefusal("As an AI, I Cannot Assist with that.", KW), true);
